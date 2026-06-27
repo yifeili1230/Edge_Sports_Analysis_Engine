@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pose Analytics Math Cheat Sheet</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <h1>Pose Analytics Math Cheat Sheet</h1>
+  <p class="lede"><code>ctx.poses</code> is the reusable data interface; rendering is only one consumer.</p>
+
+  <div class="flow">
+    <div class="step gpu"><strong>Raw output</strong><code>net.forward()</code><br>Heatmap tensor</div>
+    <div class="step cpu"><strong>Decode</strong><code>minMaxLoc()</code><br>Joint position and confidence</div>
+    <div class="step cpu"><strong>Canonical pose</strong>Named joints<br>2D plus optional depth/3D</div>
+    <div class="step cpu"><strong>Consumers</strong>Tracking, angles, velocity, reps</div>
+  </div>
+
+  <h2>Core formulas</h2>
+  <table>
+    <thead><tr><th>Metric</th><th>Formula</th><th>Unit/limit</th></tr></thead>
+    <tbody>
+      <tr><td>Joint angle</td><td>θ = acos((u·v)/(|u||v|))</td><td>2D projected angle</td></tr>
+      <tr><td>Keypoint velocity</td><td>v = (pₜ − pₜ₋₁)/Δt</td><td>pixels/s</td></tr>
+      <tr><td>Speed</td><td>|v| = √(vₓ² + vᵧ²)</td><td>pixels/s</td></tr>
+      <tr><td>Angular velocity</td><td>ω = wrap(θₜ − θₜ₋₁)/Δt</td><td>degrees/s or radians/s</td></tr>
+      <tr><td>Normalized distance</td><td>d̂ = d / body scale</td><td>Camera-distance resistant</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Reliability requirements</h2>
+  <ol>
+    <li>Use live capture time or recorded media time, not processing FPS.</li>
+    <li>Require increasing frame IDs and fresh per-frame measurement state.</li>
+    <li>Gate low-confidence joints and smooth trajectories before differentiating.</li>
+    <li>Maintain a stable person ID in multi-person scenes.</li>
+    <li>Use calibration, scale, or depth for metric speed and reliable 3D angles.</li>
+  </ol>
+
+  <p class="note">The current implementation never reuses an old pose: every successful
+  input frame runs inference, and failed results remain explicitly invalid.</p>
+</main>
+</body>
+</html>

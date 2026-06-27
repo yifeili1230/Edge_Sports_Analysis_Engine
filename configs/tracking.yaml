@@ -2,8 +2,8 @@ source: webcam
 width: 640
 height: 480
 display: true
-save_output: false
-save_path: output/tracking_output.mp4
+save_output: true
+save_path: output/output
 motion:
   threshold: 25
   min_area: 500

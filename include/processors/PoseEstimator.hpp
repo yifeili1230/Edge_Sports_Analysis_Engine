@@ -2,15 +2,17 @@
 
 #include <algorithm>  // Normalizes backend/target strings and replaces separators.
 #include <cctype>     // Converts backend/target names to lowercase safely.
+#include <limits>     // Initializes pose bounding-box extrema.
 #include <stdexcept>  // Reports model loading and backend configuration errors.
 #include <string>     // Stores model paths and backend/target names.
-#include <vector>     // Stores cached pose results.
 
 #include <opencv2/core.hpp>    // Provides cv::Mat, cv::Point, and scalar types.
 #include <opencv2/dnn.hpp>     // Provides OpenCV DNN model loading and inference.
 #include <opencv2/imgproc.hpp> // Provides blob/image preprocessing helpers.
 
 #include "core/IFrameProcessor.hpp"  // Defines the frame processor interface.
+#include "pose/OpenPoseCocoAdapter.hpp" // Maps OpenPose output channels to canonical joints.
+#include "utils/Profiler.hpp"        // Measures preprocessing, inference, and postprocessing latency.
 
 namespace video_engine {
 
@@ -18,12 +20,11 @@ class PoseEstimator : public IFrameProcessor {
 public:
     explicit PoseEstimator(std::string model_weights, std::string model_config = "",
                            int input_width = 368, int input_height = 368,
-                           float confidence_threshold = 0.12F, int inference_interval = 1,
+                           float confidence_threshold = 0.12F,
                            std::string backend = "opencv", std::string target = "cpu")
         : input_width_(input_width),
           input_height_(input_height),
-          confidence_threshold_(confidence_threshold),
-          inference_interval_(inference_interval < 1 ? 1 : inference_interval) {
+          confidence_threshold_(confidence_threshold) {
         if (model_weights.empty()) {
             throw std::runtime_error("Pose model path is empty. Set pose_model in configs/pose.yaml.");
         }
@@ -43,61 +44,97 @@ public:
             return;
         }
 
-        const bool should_run_inference =
-            cached_poses_.empty() || inference_interval_ <= 1 ||
-            frame_counter_ % static_cast<size_t>(inference_interval_) == 0;
-        ++frame_counter_;
-
-        if (!should_run_inference) {
-            ctx.poses = cached_poses_;
-            return;
-        }
-
+        const auto preprocess_start = Profiler::now();
         cv::Mat blob = cv::dnn::blobFromImage(ctx.processed_frame, 1.0 / 255.0,
                                               cv::Size(input_width_, input_height_),
                                               cv::Scalar(0, 0, 0), false, false);
         net_.setInput(blob);
-        cv::Mat output = net_.forward();
+        const auto preprocess_end = Profiler::now();
+        recordLatency(ctx, "pose_preprocess", preprocess_start, preprocess_end);
 
-        if (output.dims != 4 || output.size[1] < kKeypointCount) {
+        const auto inference_start = Profiler::now();
+        ctx.pose_inference_ran = true;
+        cv::Mat output = net_.forward();
+        const auto inference_end = Profiler::now();
+        recordLatency(ctx, "pose_inference", inference_start, inference_end);
+
+        if (output.dims != 4 ||
+            output.size[1] < static_cast<int>(kOpenPoseCocoChannelToJoint.size())) {
             throw std::runtime_error("Pose model output is not OpenPose COCO 18-keypoint format.");
         }
 
+        const auto postprocess_start = Profiler::now();
         const int heatmap_height = output.size[2];
         const int heatmap_width = output.size[3];
         const int frame_width = ctx.processed_frame.cols;
         const int frame_height = ctx.processed_frame.rows;
 
         Pose pose;
-        pose.keypoints.resize(kKeypointCount);
-        for (int part = 0; part < kKeypointCount; ++part) {
+        pose.frame_id = ctx.frame_id;
+        pose.source_time_seconds = ctx.source_time_seconds;
+        pose.frame_size_pixels =
+            FrameSize2D{static_cast<float>(frame_width), static_cast<float>(frame_height)};
+
+        float min_x = std::numeric_limits<float>::max();
+        float min_y = std::numeric_limits<float>::max();
+        float max_x = std::numeric_limits<float>::lowest();
+        float max_y = std::numeric_limits<float>::lowest();
+
+        for (std::size_t part = 0; part < kOpenPoseCocoChannelToJoint.size(); ++part) {
             cv::Mat heatmap(heatmap_height, heatmap_width, CV_32F, output.ptr(0, part));
 
             double confidence = 0.0;
             cv::Point max_location;
             cv::minMaxLoc(heatmap, nullptr, &confidence, nullptr, &max_location);
 
-            PoseKeypoint keypoint;
+            auto& keypoint = pose.joint(kOpenPoseCocoChannelToJoint[part]);
             keypoint.confidence = static_cast<float>(confidence);
-            keypoint.visible = confidence >= confidence_threshold_;
-            keypoint.point = cv::Point(
-                static_cast<int>((frame_width * max_location.x) / static_cast<float>(heatmap_width)),
-                static_cast<int>((frame_height * max_location.y) / static_cast<float>(heatmap_height)));
-            pose.keypoints[part] = keypoint;
+            keypoint.valid = confidence >= confidence_threshold_;
+            keypoint.position_2d_pixels = Point2D{
+                (frame_width * max_location.x) / static_cast<float>(heatmap_width),
+                (frame_height * max_location.y) / static_cast<float>(heatmap_height),
+            };
+
+            if (keypoint.valid) {
+                min_x = std::min(min_x, keypoint.position_2d_pixels.x);
+                min_y = std::min(min_y, keypoint.position_2d_pixels.y);
+                max_x = std::max(max_x, keypoint.position_2d_pixels.x);
+                max_y = std::max(max_y, keypoint.position_2d_pixels.y);
+            }
+        }
+
+        pose.valid = std::any_of(
+            pose.joints.begin(), pose.joints.end(),
+            [](const PoseKeypoint& keypoint) { return keypoint.valid; });
+        if (pose.valid) {
+            pose.bounding_box = BoundingBox2D{
+                min_x,
+                min_y,
+                max_x - min_x,
+                max_y - min_y,
+                true,
+            };
         }
 
         ctx.poses.clear();
         ctx.poses.push_back(pose);
-        cached_poses_ = ctx.poses;
+        ctx.pose_measurement_valid = pose.valid;
+        const auto postprocess_end = Profiler::now();
+        recordLatency(ctx, "pose_postprocess", postprocess_start, postprocess_end);
     }
 
     std::string name() const override {
         return "pose_estimator";
     }
 
-    static constexpr int kKeypointCount = 18;
-
 private:
+    void recordLatency(FrameContext& ctx, const std::string& stage,
+                       std::chrono::steady_clock::time_point start,
+                       std::chrono::steady_clock::time_point end) const {
+        ctx.stage_names.push_back(stage);
+        ctx.stage_latencies_ms.push_back(Profiler::elapsedMs(start, end));
+    }
+
     int parseBackend(std::string backend) const {
         normalize(backend);
         if (backend == "default") {
@@ -163,9 +200,6 @@ private:
     int input_width_;
     int input_height_;
     float confidence_threshold_;
-    int inference_interval_;
-    size_t frame_counter_ = 0;
-    std::vector<Pose> cached_poses_;
     cv::dnn::Net net_;
 };
 

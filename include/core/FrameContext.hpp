@@ -1,10 +1,12 @@
 #pragma once
 
-#include <chrono>  // Stores timestamps for frame-level timing.
+#include <cstdint> // Stores monotonic frame identifiers.
 #include <string>  // Stores metadata and profiling stage names.
 #include <vector>  // Stores detections, poses, trails, and timing arrays.
 
 #include <opencv2/core.hpp>  // Provides cv::Mat, cv::Rect, and cv::Point.
+
+#include "pose/PoseTypes.hpp"  // Provides model-independent pose measurements.
 
 namespace video_engine {
 
@@ -13,20 +15,13 @@ struct Detection {
     int id = -1;
 };
 
-struct PoseKeypoint {
-    cv::Point point;
-    float confidence = 0.0F;
-    bool visible = false;
-};
-
-struct Pose {
-    std::vector<PoseKeypoint> keypoints;
-};
-
 struct FrameContext {
     cv::Mat raw_frame;
     cv::Mat processed_frame;
-    std::chrono::steady_clock::time_point timestamp;
+    std::uint64_t frame_id = 0;
+    double source_time_seconds = 0.0;
+    bool pose_inference_ran = false;
+    bool pose_measurement_valid = false;
     std::vector<Detection> detections;
     std::vector<Pose> poses;
     std::vector<cv::Point> motion_points;

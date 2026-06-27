@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Reliable Per-Frame Pose Contract</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p><a href="0002-pose-results-to-motion-metrics.html">← Previous lesson</a> ·
+     <a href="../reference/pose-analytics-cheatsheet.html">Open the analytics cheat sheet →</a></p>
+  <h1>The Reliable Per-Frame Pose Contract</h1>
+  <p class="lede">Tickets #7 and #8 changed pose output from a display-oriented vector into a time-aware, model-independent measurement.</p>
+
+  <h2>1. Why cached poses were removed</h2>
+  <p>Reusing a previous pose can improve displayed FPS, but it corrupts motion analysis:</p>
+  <pre><code>fresh pose     position changes
+cached pose    position repeats → false zero velocity
+next pose      position jumps   → false velocity spike</code></pre>
+  <p>The new rule is strict: every successfully decoded frame begins with cleared pose
+  state and runs a fresh inference. A failed result remains invalid.</p>
+
+  <h2>2. FrameTimeline owns measurement identity</h2>
+  <div class="flow">
+    <div class="step cpu"><strong>Read frame</strong>Camera or video source</div>
+    <div class="step cpu"><strong>Begin frame</strong>Assign `frame_id` and source time</div>
+    <div class="step cpu"><strong>Clear state</strong>No stale poses or validity flags</div>
+    <div class="step gpu"><strong>Infer</strong>Publish a fresh result or invalid state</div>
+  </div>
+
+  <pre><code>frame_id
+source_time_seconds
+pose_inference_ran
+pose_measurement_valid</code></pre>
+
+  <p>Live input uses a monotonic clock. Recorded video uses media time with a frame/FPS
+  fallback. `FrameTimeline` rejects duplicate or decreasing source times.</p>
+
+  <h2>3. One canonical schema for every model</h2>
+  <p>`PoseTypes.hpp` contains no OpenCV types. It defines:</p>
+  <ul>
+    <li>18 named `JointId` values;</li>
+    <li>floating-point 2D pixel positions;</li>
+    <li>confidence and validity;</li>
+    <li>optional depth and 3D positions;</li>
+    <li>person ID and bounding box;</li>
+    <li>frame dimensions, frame ID, and source time.</li>
+  </ul>
+
+  <h2>4. Model adapters protect downstream code</h2>
+  <pre><code>OpenPose channel 0  ─┐
+OpenPose channel 1  ─┼→ OpenPoseCocoAdapter → JointId → Pose
+OpenPose channel 2  ─┘
+
+future ONNX output ───→ NewModelAdapter      → JointId → Pose</code></pre>
+
+  <p>Tracking, squat analysis, and rendering depend on `JointId`, not raw channel numbers.
+  Replacing the model therefore changes its adapter, not every consumer.</p>
+
+  <h2>5. What the tests prove</h2>
+  <table>
+    <thead><tr><th>Test</th><th>Contract</th></tr></thead>
+    <tbody>
+      <tr><td>`frame_timeline_test`</td><td>Increasing IDs/time; previous pose state is cleared; duplicate time is rejected</td></tr>
+      <tr><td>`pose_schema_test`</td><td>All 18 joints map exactly once; float precision and optional depth work</td></tr>
+      <tr><td>`skeleton_renderer_test`</td><td>Rendering consumes canonical named-joint data</td></tr>
+      <tr><td>Recorded-video smoke test</td><td>Real Caffe output passes through the new adapter on every frame</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card quiz">
+    <h2>Quick check</h2>
+    <ol>
+      <li>Which component owns frame identity and source time?</li>
+      <li>Why is `person_id = -1` useful before tracking is implemented?</li>
+      <li>Where should a future YOLO-pose keypoint order be converted?</li>
+    </ol>
+    <p>Ask Codex about any unclear part before moving to `SquatAnalyzer`.</p>
+  </div>
+
+  <h2>Primary references</h2>
+  <p>Read the project sources:
+    <a href="../docs/POSE_ANALYTICS_DECISION_MAP.md">decision map</a>,
+    <a href="../include/core/FrameTimeline.hpp">FrameTimeline</a>,
+    <a href="../include/pose/PoseTypes.hpp">PoseTypes</a>, and
+    <a href="../include/pose/OpenPoseCocoAdapter.hpp">OpenPose adapter</a>.
+  </p>
+
+  <footer>Lesson 0003 · Reliable timeline and canonical pose schema.</footer>
+</main>
+</body>
+</html>

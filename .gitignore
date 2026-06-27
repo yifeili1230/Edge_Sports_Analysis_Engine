@@ -8,3 +8,4 @@ models/*.t7
 *.swp
 *.swo
 .DS_Store
+docs/agents/

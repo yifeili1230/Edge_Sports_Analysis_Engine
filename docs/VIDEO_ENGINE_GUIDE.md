@@ -2,6 +2,10 @@
 
 This document explains how the video engine works, what each part of the code does, how to run it, and how to debug or modify it. It is written for someone who may not have prior experience with OpenCV, C++ video pipelines, or AI pose estimation.
 
+For focused deployment commands and inference performance details, see
+[Platform Run Guide](PLATFORM_RUN_GUIDE.md) and
+[Pose Inference Guide](POSE_INFERENCE_GUIDE.md).
+
 ## 1. What This Project Does
 
 This project is a small C++17/OpenCV video processing engine.
@@ -125,16 +129,19 @@ std::string pose_model;
 std::string pose_config;
 int pose_input_width;
 int pose_input_height;
+float pose_confidence;
+std::string inference_platform;
 std::string pose_backend;
 std::string pose_target;
 ```
 
-The config is built in two stages:
+The config is built in the following stages:
 
 ```text
-1. Start with default values in AppConfig.
-2. Read command-line arguments.
-3. Read the selected YAML-style config file.
+1. Start with default values in `AppConfig`.
+2. Pre-scan `--config` to select the configuration file.
+3. Read the selected YAML-style configuration file.
+4. Apply supported command-line overrides.
 ```
 
 For example:
@@ -563,6 +570,10 @@ The core inference call is:
 cv::Mat output = net_.forward();
 ```
 
+The estimator records `pose_preprocess`, `pose_inference`, and `pose_postprocess`
+latencies. See [Pose Inference Guide](POSE_INFERENCE_GUIDE.md) for the complete CPU/GPU
+data flow and timing definitions.
+
 The output is expected to be OpenPose COCO heatmaps:
 
 ```text
@@ -590,7 +601,6 @@ pose_config: models/pose_deploy_linevec.prototxt
 pose_input_width: 256
 pose_input_height: 256
 pose_confidence: 0.12
-pose_inference_interval: 1
 pose_backend: opencv
 pose_target: cpu
 ```
@@ -602,7 +612,6 @@ Meaning:
 - `pose_input_width`: model input width.
 - `pose_input_height`: model input height.
 - `pose_confidence`: minimum keypoint confidence required for rendering.
-- `pose_inference_interval`: run model every N frames.
 - `pose_backend`: OpenCV DNN backend.
 - `pose_target`: target hardware for OpenCV DNN.
 
@@ -714,7 +723,7 @@ You would need a YOLO-specific estimator that:
 
 ### If you switch to TensorRT
 
-On NVIDIA Jetson, the recommended high-performance path is:
+On Jetson Orin Nano, the recommended high-performance path is:
 
 ```text
 ONNX model -> TensorRT engine -> custom TensorRT inference processor
@@ -741,7 +750,8 @@ OpenCV can still handle:
 - Display
 - Video output
 
-TensorRT would only replace the expensive neural network inference part.
+TensorRT would replace the expensive neural network inference part and can use Orin
+Nano's Ampere Tensor Cores for supported FP16/INT8 operations.
 
 ## 11. Inference Backend and Target
 
@@ -774,8 +784,16 @@ pose_target: opencl
 
 ```yaml
 pose_backend: cuda
-pose_target: cuda
+pose_target: cuda_fp16
 ```
+
+The Orin profile provides the same selection:
+
+```yaml
+inference_platform: jetson
+```
+
+See [Platform Run Guide](PLATFORM_RUN_GUIDE.md) for macOS and Orin Nano commands.
 
 Important: the code accepting a backend name does not mean your installed OpenCV build supports that backend.
 
@@ -873,23 +891,42 @@ Or pass it from CLI:
 ./build/video_engine --source videos/demo.mp4 --pipeline pose --config configs/pose.yaml
 ```
 
-Note: the current program reads CLI args first and then applies the config file. If the config file also contains `source`, the config file value can override the CLI value.
-
-If you want CLI arguments to always win, change the order inside `parseArgs()`.
+Note: the program loads the config file first, then applies command-line arguments. This means command-line arguments override config-file values.
 
 ## 14. Saving Output Video
 
-You can save processed output by using:
-
-```bash
-./build/video_engine --pipeline pose --config configs/pose.yaml --save output/pose_debug.mp4
-```
-
-Or set this in the config:
+Processed output is saved by default because the config files use:
 
 ```yaml
 save_output: true
-save_path: output/pose_output.mp4
+save_path: output/output
+```
+
+`save_path` is treated as a filename prefix. The program chooses the first available numbered MP4 path with a `while` loop:
+
+```text
+output/output0.mp4
+output/output1.mp4
+output/output2.mp4
+...
+```
+
+For example, if `output/output0.mp4` already exists, the next run saves to:
+
+```text
+output/output1.mp4
+```
+
+You can override the prefix from the command line:
+
+```bash
+./build/video_engine --pipeline pose --config configs/pose.yaml --save output/pose_debug
+```
+
+That will create:
+
+```text
+output/pose_debug0.mp4
 ```
 
 The output video dimensions are:
@@ -904,14 +941,23 @@ height: 480
 The program logs lines like:
 
 ```text
-[Frame 120] FPS: 8.4 | pipeline: 116.20 ms
+[Frame 3] FPS: 3.4
+| resize: 0.40 ms
+| pose_preprocess: 0.41 ms
+| pose_inference: 261.56 ms
+| pose_postprocess: 0.01 ms
+| pose_estimator: 261.98 ms
+| skeleton_renderer: 0.10 ms
+| pipeline: 262.47 ms
 ```
 
 Meaning:
 
-- `Frame 120`: the processed frame index.
-- `FPS: 8.4`: average frames per second since startup.
-- `pipeline: 116.20 ms`: time spent running the pipeline for that frame.
+- `Frame 3`: the processed frame index.
+- `FPS: 3.4`: average frames per second since startup.
+- `pose_inference`: wall-clock time around `net_.forward()`.
+- `pose_estimator`: preprocessing, inference, and postprocessing combined.
+- `pipeline`: all processors combined; capture, display, and video writing are excluded.
 
 For pose mode, most of the latency usually comes from:
 
@@ -924,6 +970,10 @@ inside:
 ```text
 PoseEstimator.hpp
 ```
+
+The sample above was measured on the current macOS CPU setup and is not an Orin Nano
+performance claim. See [Pose Inference Guide](POSE_INFERENCE_GUIDE.md) for benchmarking
+instructions.
 
 ## 16. Debugging Strategy
 
@@ -1121,13 +1171,15 @@ Use:
 configs/pose.yaml
 ```
 
+For the full setting reference, platform comparison, and benchmark method, see
+[Pose Inference Guide](POSE_INFERENCE_GUIDE.md).
+
 Important parameters:
 
 ```yaml
 pose_input_width: 256
 pose_input_height: 256
 pose_confidence: 0.12
-pose_inference_interval: 1
 pose_backend: opencv
 pose_target: cpu
 ```
@@ -1139,7 +1191,6 @@ Try:
 ```yaml
 pose_input_width: 368
 pose_input_height: 368
-pose_inference_interval: 1
 ```
 
 This is slower but can produce better keypoint placement.
@@ -1151,22 +1202,13 @@ Try:
 ```yaml
 pose_input_width: 192
 pose_input_height: 192
-pose_inference_interval: 2
 ```
 
 This is faster but less accurate.
 
-### Lower display latency by skipping inference
-
-Try:
-
-```yaml
-pose_inference_interval: 3
-```
-
-The model runs once every 3 frames. Skipped frames reuse the latest skeleton.
-
-This improves FPS, but the skeleton can lag behind fast motion.
+The project always performs fresh inference for each successfully decoded frame. It does
+not reuse old poses to increase display FPS because stale measurements corrupt downstream
+velocity and repetition analysis.
 
 ## 20. How To Add a New Processor
 
@@ -1294,13 +1336,12 @@ Try:
 ```yaml
 pose_input_width: 192
 pose_input_height: 192
-pose_inference_interval: 3
 ```
 
 For real edge AI performance, replace the model and inference backend:
 
 ```text
-Jetson Nano: TensorRT + lightweight ONNX pose model
+Jetson Orin Nano: TensorRT + lightweight ONNX pose model
 Intel edge: OpenVINO model
 Apple Silicon: CoreML model
 ```
@@ -1361,4 +1402,3 @@ Every processor reads and writes FrameContext.
 ```
 
 Once that is clear, the rest of the project becomes much easier to modify.
-

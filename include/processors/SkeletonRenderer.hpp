@@ -4,8 +4,8 @@
 
 #include <opencv2/imgproc.hpp>  // Provides drawing APIs for skeleton lines and keypoints.
 
-#include "core/IFrameProcessor.hpp"    // Defines the frame processor interface.
-#include "processors/PoseEstimator.hpp" // Provides the OpenPose keypoint count constant.
+#include "core/IFrameProcessor.hpp" // Defines the frame processor interface.
+#include "pose/PoseTypes.hpp"       // Provides canonical named joints.
 
 namespace video_engine {
 
@@ -18,26 +18,31 @@ public:
 
         cv::Mat overlay = ctx.processed_frame.clone();
         for (const auto& pose : ctx.poses) {
-            if (pose.keypoints.size() < PoseEstimator::kKeypointCount) {
+            if (!pose.valid) {
                 continue;
             }
 
             for (const auto& [first, second] : kSkeletonPairs) {
-                const auto& a = pose.keypoints[first];
-                const auto& b = pose.keypoints[second];
-                if (a.visible && b.visible) {
-                    cv::line(overlay, a.point, b.point, cv::Scalar(45, 210, 255), 3, cv::LINE_AA);
+                const auto& a = pose.joint(first);
+                const auto& b = pose.joint(second);
+                if (a.valid && b.valid) {
+                    cv::line(overlay, toCvPoint(a.position_2d_pixels),
+                             toCvPoint(b.position_2d_pixels),
+                             cv::Scalar(45, 210, 255), 3, cv::LINE_AA);
                 }
             }
 
-            for (size_t i = 0; i < pose.keypoints.size(); ++i) {
-                const auto& keypoint = pose.keypoints[i];
-                if (!keypoint.visible) {
+            for (std::size_t i = 0; i < pose.joints.size(); ++i) {
+                const auto& keypoint = pose.joints[i];
+                if (!keypoint.valid) {
                     continue;
                 }
-                const cv::Scalar color = i == 0 ? cv::Scalar(0, 80, 255) : cv::Scalar(40, 255, 90);
-                cv::circle(overlay, keypoint.point, i == 0 ? 6 : 5, color, cv::FILLED, cv::LINE_AA);
-                cv::circle(overlay, keypoint.point, i == 0 ? 8 : 7, cv::Scalar(20, 20, 20), 1,
+                const bool is_nose = i == jointIndex(JointId::Nose);
+                const cv::Scalar color =
+                    is_nose ? cv::Scalar(0, 80, 255) : cv::Scalar(40, 255, 90);
+                const cv::Point point = toCvPoint(keypoint.position_2d_pixels);
+                cv::circle(overlay, point, is_nose ? 6 : 5, color, cv::FILLED, cv::LINE_AA);
+                cv::circle(overlay, point, is_nose ? 8 : 7, cv::Scalar(20, 20, 20), 1,
                            cv::LINE_AA);
             }
         }
@@ -50,21 +55,25 @@ public:
     }
 
 private:
-    static constexpr std::array<std::pair<int, int>, 14> kSkeletonPairs = {{
-        {1, 2},   // neck to right shoulder
-        {2, 3},   // right shoulder to right elbow
-        {3, 4},   // right elbow to right wrist
-        {1, 5},   // neck to left shoulder
-        {5, 6},   // left shoulder to left elbow
-        {6, 7},   // left elbow to left wrist
-        {1, 8},   // neck to right hip
-        {8, 9},   // right hip to right knee
-        {9, 10},  // right knee to right ankle
-        {1, 11},  // neck to left hip
-        {11, 12}, // left hip to left knee
-        {12, 13}, // left knee to left ankle
-        {0, 1},   // head point to neck
-        {8, 11},  // hips
+    static cv::Point toCvPoint(const Point2D& point) {
+        return cv::Point(cvRound(point.x), cvRound(point.y));
+    }
+
+    static constexpr std::array<std::pair<JointId, JointId>, 14> kSkeletonPairs = {{
+        {JointId::Neck, JointId::RightShoulder},
+        {JointId::RightShoulder, JointId::RightElbow},
+        {JointId::RightElbow, JointId::RightWrist},
+        {JointId::Neck, JointId::LeftShoulder},
+        {JointId::LeftShoulder, JointId::LeftElbow},
+        {JointId::LeftElbow, JointId::LeftWrist},
+        {JointId::Neck, JointId::RightHip},
+        {JointId::RightHip, JointId::RightKnee},
+        {JointId::RightKnee, JointId::RightAnkle},
+        {JointId::Neck, JointId::LeftHip},
+        {JointId::LeftHip, JointId::LeftKnee},
+        {JointId::LeftKnee, JointId::LeftAnkle},
+        {JointId::Nose, JointId::Neck},
+        {JointId::RightHip, JointId::LeftHip},
     }};
 };
 

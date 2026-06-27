@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>From Pose Results to Motion Metrics</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p><a href="0001-cpu-gpu-dataflow.html">← Previous lesson</a> ·
+     <a href="../reference/pose-analytics-cheatsheet.html">Open the math cheat sheet →</a></p>
+  <h1>From Pose Results to Motion Metrics</h1>
+  <p class="lede">Identify the reusable pose interface and the state required for reliable angles, velocity, and repetitions.</p>
+
+  <h2>1. The result is created before rendering</h2>
+  <div class="flow">
+    <div class="step gpu"><strong>Raw network output</strong><code>net.forward()</code><br>Heatmap tensor</div>
+    <div class="step cpu"><strong>Postprocess</strong><code>minMaxLoc()</code><br>Model-channel observations</div>
+    <div class="step cpu"><strong>Canonicalize</strong>OpenPose adapter<br>Named `JointId` values</div>
+    <div class="step cpu"><strong>Publish</strong><code>ctx.poses</code><br>Reusable measurements</div>
+  </div>
+
+  <pre><code>struct PoseKeypoint {
+    Point2D position_2d_pixels;
+    float confidence;
+    bool valid;
+    optional&lt;float&gt; depth_meters;
+    optional&lt;Point3D&gt; position_3d_meters;
+};
+
+struct Pose {
+    int64_t person_id;
+    uint64_t frame_id;
+    double source_time_seconds;
+    BoundingBox2D bounding_box;
+    array&lt;PoseKeypoint, kJointCount&gt; joints;
+};</code></pre>
+
+  <p>`SkeletonRenderer` is only a consumer. Analytics can be inserted before it:</p>
+  <pre><code>PoseEstimator
+→ PrimarySubjectTracker
+→ PoseAnalyticsProcessor
+→ SkeletonRenderer</code></pre>
+
+  <h2>2. Joint angle</h2>
+  <p>For shoulder A, elbow B, and wrist C:</p>
+  <pre><code>u = A - B
+v = C - B
+theta = acos(dot(u, v) / (norm(u) * norm(v)))</code></pre>
+  <p>This is a 2D projected angle. It is not automatically a true 3D anatomical angle.</p>
+
+  <h2>3. Motion speed</h2>
+  <pre><code>velocity = (current_position - previous_position) / delta_time
+speed = sqrt(velocity.x² + velocity.y²)</code></pre>
+  <p>Without calibration or depth, the unit is pixels per second. Body-scale normalization
+  can make comparisons more stable within a fixed camera setup.</p>
+
+  <h2>4. What is already reliable</h2>
+  <table>
+    <thead><tr><th>Concern</th><th>Current contract</th></tr></thead>
+    <tbody>
+      <tr><td>Timeline</td><td>Increasing frame ID and source-relative time</td></tr>
+      <tr><td>Freshness</td><td>Every successful input frame runs inference; old poses are never reused</td></tr>
+      <tr><td>Validity</td><td>`pose_inference_ran` and `pose_measurement_valid` are explicit</td></tr>
+      <tr><td>Model independence</td><td>Named canonical joints replace raw model channel numbers</td></tr>
+      <tr><td>Future depth</td><td>Optional depth and 3D fields remain empty for monocular input</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5. What still needs implementation</h2>
+  <ul>
+    <li>Primary-person tracking and stable identity.</li>
+    <li>Confidence gating and trajectory smoothing.</li>
+    <li>Pure mathematical `IPoseAnalyzer` and `SquatAnalyzer`.</li>
+    <li>Camera calibration or depth for metric motion and reliable 3D geometry.</li>
+  </ul>
+
+  <p>OpenCV provides a <a href="https://docs.opencv.org/4.x/dd/d6a/classcv_1_1KalmanFilter.html">Kalman filter</a>
+  for future trajectory filtering and a
+  <a href="https://docs.opencv.org/4.x/d4/d94/tutorial_camera_calibration.html">camera calibration workflow</a>
+  for relating image points to a camera model.</p>
+
+  <div class="card quiz">
+    <h2>Quick check</h2>
+    <ol>
+      <li>What is the difference between `net.forward()` output and `ctx.poses`?</li>
+      <li>Why must a failed frame remain invalid instead of inheriting the previous pose?</li>
+      <li>What unit does uncalibrated wrist speed use?</li>
+    </ol>
+    <p>Send your answers to Codex for immediate feedback.</p>
+  </div>
+
+  <p><a href="0003-reliable-pose-contract.html">Next: the reliable pose contract →</a></p>
+  <footer>Lesson 0002 · From pose keypoints to reusable motion measurements.</footer>
+</main>
+</body>
+</html>

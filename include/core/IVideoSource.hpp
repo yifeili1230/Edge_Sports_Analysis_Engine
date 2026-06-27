@@ -10,6 +10,7 @@ public:
     virtual bool open() = 0;
     virtual bool read(cv::Mat& frame) = 0;
     virtual double fps() const = 0;
+    virtual double timestampSeconds() const = 0;
 };
 
 }  // namespace video_engine

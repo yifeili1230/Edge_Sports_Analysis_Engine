@@ -1,0 +1,80 @@
+:root {
+  color-scheme: light;
+  --ink: #18212b;
+  --muted: #5e6a76;
+  --paper: #fbfaf7;
+  --panel: #ffffff;
+  --line: #d9dee3;
+  --cpu: #df6b3f;
+  --gpu: #2f8b73;
+  --copy: #8a67b8;
+  --accent: #1f5f99;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+  line-height: 1.65;
+}
+
+main {
+  width: min(1040px, calc(100% - 32px));
+  margin: 48px auto 80px;
+}
+
+h1, h2, h3 { line-height: 1.2; }
+h1 { font-size: clamp(2rem, 5vw, 3.5rem); margin-bottom: .35rem; }
+h2 { margin-top: 2.5rem; border-bottom: 1px solid var(--line); padding-bottom: .35rem; }
+a { color: var(--accent); }
+.lede { color: var(--muted); font-size: 1.15rem; max-width: 760px; }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px;
+  margin: 18px 0;
+  box-shadow: 0 5px 18px rgba(24, 33, 43, .04);
+}
+.flow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 10px;
+  margin: 20px 0;
+}
+.step { border-radius: 10px; padding: 13px; border: 2px solid; min-height: 106px; }
+.step strong { display: block; margin-bottom: 5px; }
+.cpu { border-color: var(--cpu); background: #fff6f1; }
+.gpu { border-color: var(--gpu); background: #effaf6; }
+.copy { border-color: var(--copy); background: #f7f2fc; }
+.tag {
+  display: inline-block;
+  border-radius: 99px;
+  padding: 2px 9px;
+  margin-right: 5px;
+  color: white;
+  font-size: .78rem;
+  font-weight: 700;
+}
+.tag.cpu { background: var(--cpu); }
+.tag.gpu { background: var(--gpu); }
+.tag.copy { background: var(--copy); }
+table { border-collapse: collapse; width: 100%; background: var(--panel); }
+th, td { text-align: left; vertical-align: top; padding: 11px; border-bottom: 1px solid var(--line); }
+th { background: #eef2f5; }
+code { background: #eef2f5; padding: .1em .3em; border-radius: 4px; }
+pre { overflow-x: auto; background: #17202a; color: #f4f6f7; padding: 16px; border-radius: 10px; }
+.priority { font-size: 1.1rem; font-weight: 700; }
+.note { border-left: 4px solid var(--accent); padding: 10px 16px; background: #eef6fd; }
+.quiz { border: 2px dashed var(--accent); background: #f7fbff; }
+footer { margin-top: 50px; color: var(--muted); font-size: .9rem; }
+
+@media print {
+  body { background: white; }
+  main { width: 100%; margin: 0; }
+  .card { box-shadow: none; break-inside: avoid; }
+  a { color: inherit; text-decoration: none; }
+}

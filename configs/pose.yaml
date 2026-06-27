@@ -2,14 +2,13 @@ source: webcam
 width: 640
 height: 480
 display: true
-save_output: false
-save_path: output/pose_output.mp4
+save_output: true
+save_path: output/output
 pose:
   pose_model: models/pose_iter_440000.caffemodel
   pose_config: models/pose_deploy_linevec.prototxt
   pose_input_width: 256
   pose_input_height: 256
   pose_confidence: 0.12
-  pose_inference_interval: 1
   pose_backend: opencv
   pose_target: cpu

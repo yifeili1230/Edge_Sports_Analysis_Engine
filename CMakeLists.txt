@@ -27,3 +27,13 @@ add_executable(skeleton_renderer_test tests/test_skeleton_renderer.cpp)
 target_link_libraries(skeleton_renderer_test PRIVATE ${OpenCV_LIBS})
 target_include_directories(skeleton_renderer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 add_test(NAME skeleton_renderer_test COMMAND skeleton_renderer_test)
+
+add_executable(frame_timeline_test tests/test_frame_timeline.cpp)
+target_link_libraries(frame_timeline_test PRIVATE ${OpenCV_LIBS})
+target_include_directories(frame_timeline_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_test(NAME frame_timeline_test COMMAND frame_timeline_test)
+
+add_executable(pose_schema_test tests/test_pose_schema.cpp)
+target_link_libraries(pose_schema_test PRIVATE ${OpenCV_LIBS})
+target_include_directories(pose_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_test(NAME pose_schema_test COMMAND pose_schema_test)

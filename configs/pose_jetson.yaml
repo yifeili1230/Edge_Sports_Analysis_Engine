@@ -1,0 +1,15 @@
+# Jetson Orin Nano profile for the existing OpenPose COCO Caffe model.
+# This requires an OpenCV build with CUDA, cuDNN, and OPENCV_DNN_CUDA enabled.
+source: webcam
+width: 640
+height: 480
+display: true
+save_output: false
+save_path: output/jetson_pose
+pose:
+  pose_model: models/pose_iter_440000.caffemodel
+  pose_config: models/pose_deploy_linevec.prototxt
+  pose_input_width: 192
+  pose_input_height: 192
+  pose_confidence: 0.12
+  inference_platform: jetson

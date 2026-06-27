@@ -8,12 +8,14 @@ int main() {
     ctx.processed_frame = cv::Mat::zeros(240, 320, CV_8UC3);
 
     video_engine::Pose pose;
-    pose.keypoints.resize(video_engine::PoseEstimator::kKeypointCount);
+    pose.valid = true;
     const int points[] = {0, 1, 2, 3, 4, 8, 9, 10};
     for (int index : points) {
-        pose.keypoints[index].visible = true;
-        pose.keypoints[index].confidence = 0.9F;
-        pose.keypoints[index].point = cv::Point(80 + index * 8, 60 + index * 4);
+        pose.joints[index].valid = true;
+        pose.joints[index].confidence = 0.9F;
+        pose.joints[index].position_2d_pixels =
+            video_engine::Point2D{static_cast<float>(80 + index * 8),
+                                  static_cast<float>(60 + index * 4)};
     }
     ctx.poses.push_back(pose);
 

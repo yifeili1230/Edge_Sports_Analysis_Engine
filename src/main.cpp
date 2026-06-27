@@ -1,7 +1,9 @@
 #include <chrono>    // Provides timing utilities for FPS and pipeline latency measurement.
+#include <filesystem> // Provides output directory creation and file existence checks.
 #include <fstream>   // Provides file input for reading configs/*.yaml.
 #include <iostream>  // Provides standard output streams for error messages.
 #include <memory>    // Provides std::unique_ptr for owned source, pipeline, and processor objects.
+#include <stdexcept> // Provides runtime errors for invalid inference platform selections.
 #include <string>    // Provides std::string for paths, pipeline names, and backend names.
 #include <vector>    // Provides std::vector for stages, detections, keypoints, and trails.
 
@@ -10,6 +12,7 @@
 #include <opencv2/videoio.hpp>  // Provides OpenCV video capture/output APIs such as cv::VideoWriter.
 
 #include "core/FrameContext.hpp"             // Defines the per-frame data object shared across processors.
+#include "core/FrameTimeline.hpp"            // Assigns monotonic frame IDs and source timestamps.
 #include "core/Pipeline.hpp"                 // Runs a sequence of IFrameProcessor stages.
 #include "processors/MotionDetector.hpp"     // Detects moving regions with frame differencing.
 #include "processors/ObjectTracker.hpp"      // Tracks detections by matching bounding-box centroids.
@@ -25,11 +28,11 @@ namespace {  // Keeps helper types and functions private to this translation uni
 
 struct AppConfig {  // Stores all runtime configuration with defaults.
     std::string source = "webcam";  // Input source; "webcam" means camera, otherwise it is a file path.
-    std::string pipeline = "motion";  // Pipeline mode; supported values are motion, tracking, and pose.
-    std::string config_path = "configs/motion.yaml";  // Default config file path.
+    std::string pipeline = "pose";  // Pipeline mode; supported values are motion, tracking, and pose.
+    std::string config_path = "configs/pose.yaml";  // Default config file path.
     bool display = true;  // Whether to show a live OpenCV window.
-    bool save_output = false;  // Whether to save processed frames as a video.
-    std::string save_path = "output/output.mp4";  // Output video path.
+    bool save_output = true;  // Whether to save processed frames as a video.
+    std::string save_path = "output/output";  // Output video prefix used for numbered MP4 files.
     int width = 640;  // Processing frame width used by ResizeProcessor.
     int height = 480;  // Processing frame height used by ResizeProcessor.
     int threshold = 25;  // Motion binary threshold; higher values are less sensitive.
@@ -44,10 +47,30 @@ struct AppConfig {  // Stores all runtime configuration with defaults.
     int pose_input_width = 368;  // Width of the tensor sent into the pose model.
     int pose_input_height = 368;  // Height of the tensor sent into the pose model.
     float pose_confidence = 0.12F;  // Minimum keypoint confidence required for rendering.
-    int pose_inference_interval = 1;  // Run pose inference every N frames; 1 means every frame.
+    std::string inference_platform = "manual";  // Optional profile that selects a matching DNN backend and target.
     std::string pose_backend = "opencv";  // OpenCV DNN backend, for example opencv, openvino, or cuda.
     std::string pose_target = "cpu";  // OpenCV DNN target device, for example cpu, opencl, cuda, or npu.
 };  // End of AppConfig.
+
+void configureInferencePlatform(AppConfig& config, const std::string& platform) {  // Applies convenient hardware-specific inference defaults.
+    if (platform.empty() || platform == "manual") {  // Keeps explicitly configured backend and target values.
+        return;  // Leaves the detailed DNN settings unchanged.
+    }  // End of manual configuration branch.
+    if (platform == "cpu") {  // Selects the portable CPU profile.
+        config.pose_backend = "opencv";  // Uses OpenCV's built-in DNN implementation.
+        config.pose_target = "cpu";  // Runs network layers on the CPU.
+        return;  // Finishes applying the CPU profile.
+    }  // End of CPU profile branch.
+    if (platform == "jetson" || platform == "orin-nano" ||
+        platform == "jetson-orin-nano") {  // Selects NVIDIA Jetson Orin Nano GPU inference.
+        config.pose_backend = "cuda";  // Uses OpenCV DNN's CUDA backend.
+        config.pose_target = "cuda_fp16";  // Uses FP16 CUDA inference to reduce compute and memory traffic.
+        return;  // Finishes applying the Jetson profile.
+    }  // End of Jetson profile branch.
+    throw std::runtime_error(  // Rejects misspelled profiles instead of unexpectedly running on the CPU.
+        "Unsupported inference platform: " + platform +
+        ". Use manual, cpu, jetson, or jetson-orin-nano.");
+}  // End of configureInferencePlatform.
 
 void applyConfigFile(AppConfig& config, const std::string& path) {  // Applies config-file values to AppConfig.
     std::ifstream input(path);  // Opens the config file.
@@ -111,8 +134,8 @@ void applyConfigFile(AppConfig& config, const std::string& path) {  // Applies c
             config.pose_input_height = std::stoi(value);  // Converts the value to an integer.
         } else if (key == "pose_confidence") {  // Configures pose keypoint confidence threshold.
             config.pose_confidence = std::stof(value);  // Converts the value to a float.
-        } else if (key == "pose_inference_interval") {  // Configures pose inference frame skipping.
-            config.pose_inference_interval = std::stoi(value);  // Converts the value to an integer.
+        } else if (key == "inference_platform") {  // Configures a hardware-specific inference profile.
+            config.inference_platform = value;  // Stores the profile name for application after all overrides.
         } else if (key == "pose_backend") {  // Configures the OpenCV DNN backend.
             config.pose_backend = value;  // Stores the backend name.
         } else if (key == "pose_target") {  // Configures the OpenCV DNN target device.
@@ -123,6 +146,14 @@ void applyConfigFile(AppConfig& config, const std::string& path) {  // Applies c
 
 AppConfig parseArgs(int argc, char** argv) {  // Parses CLI arguments and loads the selected config file.
     AppConfig config;  // Starts with default configuration.
+    for (int i = 1; i < argc; ++i) {  // First pass only finds the requested config file.
+        std::string arg = argv[i];  // Wraps the current argument in std::string for comparison.
+        if (arg == "--config" && i + 1 < argc) {  // Handles --config before loading file settings.
+            config.config_path = argv[++i];  // Consumes the next argument as the config path.
+        }  // End of config-path pre-scan.
+    }  // End of config-path pre-scan loop.
+    applyConfigFile(config, config.config_path);  // Applies config-file values before CLI overrides.
+
     for (int i = 1; i < argc; ++i) {  // Iterates over user-provided command-line arguments.
         std::string arg = argv[i];  // Wraps the current argument in std::string for comparison.
         if (arg == "--source" && i + 1 < argc) {  // Handles --source when a value follows it.
@@ -133,12 +164,18 @@ AppConfig parseArgs(int argc, char** argv) {  // Parses CLI arguments and loads 
             config.config_path = argv[++i];  // Consumes the next argument as the config path.
         } else if (arg == "--display") {  // Handles explicit live-display request.
             config.display = true;  // Enables display.
+        } else if (arg == "--no-display") {  // Handles headless operation over SSH or without a desktop session.
+            config.display = false;  // Disables OpenCV window creation.
+        } else if (arg == "--inference-platform" && i + 1 < argc) {  // Handles a named inference hardware profile.
+            config.inference_platform = argv[++i];  // Consumes manual, cpu, or jetson.
         } else if (arg == "--save" && i + 1 < argc) {  // Handles output video saving.
             config.save_output = true;  // Enables saving.
             config.save_path = argv[++i];  // Consumes the next argument as the output path.
+        } else if (arg == "--no-save") {  // Handles explicit output-video disabling.
+            config.save_output = false;  // Avoids encoding overhead when only live inference is needed.
         }  // End of CLI argument dispatch.
     }  // End of CLI argument loop.
-    applyConfigFile(config, config.config_path);  // Applies config-file values after basic CLI parsing.
+    configureInferencePlatform(config, config.inference_platform);  // Resolves the final platform into backend and target settings.
     return config;  // Returns the final runtime configuration.
 }  // End of parseArgs.
 
@@ -155,8 +192,7 @@ std::unique_ptr<video_engine::Pipeline> buildPipeline(const AppConfig& config) {
     if (config.pipeline == "pose") {  // Builds the pose-estimation pipeline.
         pipeline->addProcessor(std::make_unique<video_engine::PoseEstimator>(  // Adds the pose inference stage.
             config.pose_model, config.pose_config, config.pose_input_width, config.pose_input_height,  // Passes model paths and input dimensions.
-            config.pose_confidence, config.pose_inference_interval, config.pose_backend,  // Passes confidence, frame-skip, and backend settings.
-            config.pose_target));  // Passes the target inference device.
+            config.pose_confidence, config.pose_backend, config.pose_target));  // Passes confidence and inference device settings.
         pipeline->addProcessor(std::make_unique<video_engine::SkeletonRenderer>());  // Adds skeleton drawing after inference.
         return pipeline;  // Returns early because pose mode does not use motion boxes.
     }  // End of pose pipeline branch.
@@ -170,10 +206,33 @@ std::unique_ptr<video_engine::Pipeline> buildPipeline(const AppConfig& config) {
     return pipeline;  // Returns the motion or tracking pipeline.
 }  // End of buildPipeline.
 
+std::string nextOutputPath(const std::string& output_prefix) {  // Finds the first available numbered MP4 path.
+    std::filesystem::path prefix(output_prefix);  // Treats the config value as a path prefix.
+    std::filesystem::path directory = prefix.parent_path();  // Extracts the output directory.
+    if (!directory.empty()) {  // Creates the directory only when the prefix includes one.
+        std::filesystem::create_directories(directory);  // Ensures the output folder exists.
+    }  // End of output directory setup.
+
+    int index = 0;  // Starts numbering at output0.mp4.
+    while (true) {  // Keeps trying names until an unused path is found.
+        std::filesystem::path candidate = prefix.string() + std::to_string(index) + ".mp4";  // Builds outputN.mp4.
+        if (!std::filesystem::exists(candidate)) {  // Uses this path only if it does not already exist.
+            return candidate.string();  // Returns the first available output path.
+        }  // End of availability check.
+        ++index;  // Tries the next numbered filename.
+    }  // End of output path search loop.
+}  // End of nextOutputPath.
+
 }  // namespace
 
 int main(int argc, char** argv) {  // Program entry point.
-    auto config = parseArgs(argc, argv);  // Builds the runtime config from CLI and file input.
+    AppConfig config;  // Holds the final runtime configuration.
+    try {
+        config = parseArgs(argc, argv);  // Builds the runtime config from CLI and file input.
+    } catch (const std::exception& error) {
+        std::cerr << "Invalid configuration: " << error.what() << std::endl;  // Reports malformed values or unsupported profiles.
+        return 1;  // Stops before opening video devices with an invalid configuration.
+    }
     auto source = createSource(config);  // Creates a webcam or video-file source.
     if (!source->open()) {  // Opens the source and checks for failure.
         std::cerr << "Failed to open source: " << config.source << std::endl;  // Reports the failed source path/name.
@@ -182,12 +241,25 @@ int main(int argc, char** argv) {  // Program entry point.
 
     cv::VideoWriter writer;  // Creates a video writer that starts closed.
     if (config.save_output) {  // Enables output writing only when requested.
-        writer.open(config.save_path, cv::VideoWriter::fourcc('m', 'p', '4', 'v'), 30.0,  // Opens an MP4V writer at 30 FPS.
+        const std::string output_path = nextOutputPath(config.save_path);  // Chooses output0/output1/... without overwriting.
+        writer.open(output_path, cv::VideoWriter::fourcc('m', 'p', '4', 'v'), 30.0,  // Opens an MP4V writer at 30 FPS.
                     cv::Size(config.width, config.height));  // Uses the same dimensions as the processed frame.
+        if (!writer.isOpened()) {  // Checks whether the output file could be opened.
+            std::cerr << "Failed to open output video: " << output_path << std::endl;  // Reports the failed output path.
+            return 1;  // Returns non-zero to indicate startup failure.
+        }  // End of output writer failure handling.
+        std::cout << "Saving output video to: " << output_path << std::endl;  // Prints the selected output path.
     }  // End of writer setup.
 
-    auto pipeline = buildPipeline(config);  // Creates the configured frame-processing pipeline.
+    std::unique_ptr<video_engine::Pipeline> pipeline;  // Owns the configured frame-processing pipeline.
+    try {
+        pipeline = buildPipeline(config);  // Creates the pipeline and validates its inference device.
+    } catch (const std::exception& error) {
+        std::cerr << "Failed to build pipeline: " << error.what() << std::endl;  // Reports model or backend setup failures cleanly.
+        return 1;  // Stops before entering the frame loop with an invalid pipeline.
+    }
     video_engine::FrameContext ctx;  // Reused per-frame data container passed through the pipeline.
+    video_engine::FrameTimeline timeline;  // Owns the monotonic frame and source-time contract.
 
     size_t frame_index = 0;  // Counts processed frames for FPS calculation.
     auto start_time = video_engine::Profiler::now();  // Captures the start time for average FPS.
@@ -196,10 +268,15 @@ int main(int argc, char** argv) {  // Program entry point.
         if (!source->read(frame)) {  // Reads the next frame from the selected source.
             break;  // Stops when the source has no more frames or cannot provide one.
         }  // End of frame read check.
+        try {
+            timeline.beginFrame(ctx, source->timestampSeconds());  // Starts a fresh pose measurement for this source frame.
+        } catch (const std::exception& error) {
+            std::cerr << "Invalid frame timeline: " << error.what() << std::endl;
+            return 1;
+        }
         ctx.raw_frame = frame;  // Stores the raw frame for downstream processors.
         ctx.processed_frame.release();  // Clears the previous processed frame.
         ctx.detections.clear();  // Clears detections from the previous frame.
-        ctx.poses.clear();  // Clears pose results from the previous frame.
         ctx.motion_points.clear();  // Clears motion points from the previous frame.
         ctx.stage_names.clear();  // Clears previous profiling stage names.
         ctx.stage_latencies_ms.clear();  // Clears previous profiling stage timings.

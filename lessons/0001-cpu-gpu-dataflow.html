@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Where Does One Video Frame Run?</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p><a href="../reference/jetson-pipeline-cheatsheet.html">Open the optimization cheat sheet →</a></p>
+  <h1>Where Does One Video Frame Run?</h1>
+  <p class="lede">Learn the current CPU/GPU boundary and optimize by measured impact rather than by “GPU coverage.”</p>
+
+  <h2>1. Current data flow</h2>
+  <div class="flow">
+    <div class="step cpu"><strong>Capture</strong><code>VideoCapture.read</code><br>CPU-accessible `cv::Mat`</div>
+    <div class="step cpu"><strong>Resize</strong><code>cv::resize</code><br>CPU processed frame</div>
+    <div class="step cpu"><strong>Preprocess</strong><code>blobFromImage</code><br>CPU NCHW blob</div>
+    <div class="step copy"><strong>Upload</strong><code>setInput</code><br>Host-to-device boundary</div>
+    <div class="step gpu"><strong>Inference</strong><code>net.forward</code><br>CPU or CUDA FP16</div>
+    <div class="step copy"><strong>Download</strong>Heatmap output<br>CPU-accessible result</div>
+    <div class="step cpu"><strong>Decode</strong><code>minMaxLoc × 18</code><br>Canonical joints</div>
+    <div class="step cpu"><strong>Render/output</strong>Draw, display, encode</div>
+  </div>
+
+  <h2>2. Optimize the dominant term</h2>
+  <pre><code>frame cost =
+capture + resize + preprocess + transfer +
+inference + postprocess + render + output</code></pre>
+
+  <p>On the current macOS CPU setup, pose inference is about 250–330 ms while resize and
+  rendering are typically below 2 ms combined. Removing a one-millisecond stage cannot
+  rescue a 250-millisecond model.</p>
+
+  <table>
+    <thead><tr><th>Change</th><th>Potential</th><th>Complexity</th><th>Priority</th></tr></thead>
+    <tbody>
+      <tr><td>OpenCV DNN CUDA FP16</td><td>High</td><td>Medium</td><td class="priority">P0</td></tr>
+      <tr><td>Smaller model input</td><td>High</td><td>Low; accuracy tradeoff</td><td class="priority">P0</td></tr>
+      <tr><td>Faster multi-person TensorRT model</td><td>Very high</td><td>High</td><td class="priority">P1</td></tr>
+      <tr><td>Hardware decode/GStreamer</td><td>Input-dependent</td><td>Medium</td><td>P2</td></tr>
+      <tr><td>GPU preprocessing</td><td>Small to medium</td><td>Medium</td><td>P2</td></tr>
+      <tr><td>NVMM/CUDA zero-copy</td><td>Late-stage</td><td>Very high</td><td>P3</td></tr>
+    </tbody>
+  </table>
+
+  <h2>3. Practical Orin path</h2>
+  <div class="card">
+    <h3>Stage A: accelerate inference</h3>
+    <p>Use CUDA FP16, keep fresh inference on every frame, benchmark without display or
+    saving, and confirm GPU load with <code>tegrastats</code>.</p>
+  </div>
+  <div class="card">
+    <h3>Stage B: replace the heavy model</h3>
+    <pre><code>ResizeProcessor
+→ ONNX/TensorRT pose adapter
+→ canonical Pose
+→ tracking and analytics
+→ SkeletonRenderer</code></pre>
+  </div>
+  <div class="card">
+    <h3>Stage C: reduce transfer cost</h3>
+    <pre><code>camera / compressed video
+→ hardware decode / NVMM
+→ GPU preprocessing
+→ TensorRT
+→ small pose result returned to CPU</code></pre>
+  </div>
+
+  <h2>4. Throughput is not latency</h2>
+  <p>Capture, inference, and output can eventually run in bounded asynchronous stages.
+  Keep queues small and drop old frames when necessary; unlimited queues increase delay
+  even if reported throughput looks good.</p>
+
+  <div class="card quiz">
+    <h2>Quick check</h2>
+    <ol>
+      <li>If inference costs 200 ms and resize costs 2 ms, which should be optimized first?</li>
+      <li>Why does selecting CUDA not turn `processed_frame` into a GPU tensor?</li>
+      <li>When does zero-copy become worth its complexity?</li>
+    </ol>
+    <p>Send your answers to Codex for immediate feedback.</p>
+  </div>
+
+  <p><a href="0002-pose-results-to-motion-metrics.html">Next: pose results to motion metrics →</a></p>
+  <footer>Lesson 0001 · CPU/GPU data flow on Jetson Orin Nano.</footer>
+</main>
+</body>
+</html>

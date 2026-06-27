@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jetson Orin Nano Inference Optimization Cheat Sheet</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <h1>Jetson Orin Nano Inference Optimization</h1>
+  <p class="lede">Optimize the dominant cost first, preserve fresh measurements, then remove transfers.</p>
+
+  <table>
+    <thead><tr><th>Stage</th><th>Current path</th><th>Preferred optimization</th><th>When</th></tr></thead>
+    <tbody>
+      <tr><td>Capture/decode</td><td>CPU-facing `VideoCapture`</td><td>Jetson GStreamer hardware path</td><td>When compressed input is significant</td></tr>
+      <tr><td>Resize</td><td>CPU `cv::resize`</td><td>Keep CPU initially; later CUDA resize</td><td>Only when profiling justifies it</td></tr>
+      <tr><td>Preprocess</td><td>CPU `blobFromImage`</td><td>TensorRT/CUDA preprocessing</td><td>After inference becomes fast</td></tr>
+      <tr><td>Pose inference</td><td>CPU or CUDA FP16</td><td>TensorRT lightweight ONNX model</td><td>Highest priority</td></tr>
+      <tr><td>Postprocess</td><td>CPU</td><td>Keep CPU initially</td><td>Usually small</td></tr>
+      <tr><td>Render/output</td><td>CPU</td><td>Disable for benchmarks</td><td>Optimize only if measured</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Recommended order</h2>
+  <ol>
+    <li>Measure every stage with a fixed video.</li>
+    <li>Enable OpenCV DNN CUDA FP16.</li>
+    <li>Reduce model input size while preserving fresh inference on every frame.</li>
+    <li>Replace OpenPose with a faster multi-person ONNX/TensorRT model.</li>
+    <li>Add hardware decode, GPU preprocessing, or zero-copy only after profiling.</li>
+  </ol>
+
+  <pre><code>./build/video_engine \
+  --source video_source/squat.mov \
+  --pipeline pose \
+  --config configs/pose_jetson.yaml \
+  --no-display \
+  --no-save</code></pre>
+
+  <p class="note">Orin Nano has Ampere Tensor Cores. TensorRT can use optimized FP16/INT8
+  kernels when supported by the model, but TensorRT and Tensor Cores are not the same
+  concept.</p>
+</main>
+</body>
+</html>
