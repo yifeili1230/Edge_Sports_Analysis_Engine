@@ -1,0 +1,19 @@
+# YOLO11n-pose on Jetson: image work and decoding stay on CPU; only inference
+# runs in a native TensorRT FP16 engine on the GPU/Tensor Cores.
+source: video_source/squat.mov
+width: 640
+height: 640
+resize_mode: fit
+display: true
+save_output: true
+save_path: output/yolo11_pose
+pose:
+  pose_model: models/yolo11n-pose-fp16.engine
+  pose_format: yolo11_pose
+  pose_input_width: 640
+  pose_input_height: 640
+  pose_confidence: 0.50
+  pose_detection_confidence: 0.25
+  pose_nms_threshold: 0.45
+  pose_max_people: 5
+  inference_platform: tensorrt

@@ -1,22 +1,22 @@
-# Side-view squat analysis profile for macOS CPU development.
+# Squat analytics with OpenPose COCO Caffe inference on Jetson CUDA FP16.
+# Requires an OpenCV build with CUDA, cuDNN, and OPENCV_DNN_CUDA enabled.
 source: video_source/squat.mov
 width: 640
 height: 640
 resize_mode: fit
 display: true
 save_output: true
-save_path: output/squat_annotated
+save_path: output/caffe_squat
 exercise: squat
 analysis_output_dir: output
 pose:
   pose_model: models/pose_iter_440000.caffemodel
   pose_config: models/pose_deploy_linevec.prototxt
   pose_format: openpose_coco
-  pose_input_width: 256
-  pose_input_height: 256
+  pose_input_width: 192
+  pose_input_height: 192
   pose_confidence: 0.12
-  pose_backend: opencv
-  pose_target: cpu
+  inference_platform: jetson
 squat:
   film_side: right_side_view
   squat_standing_angle: 160

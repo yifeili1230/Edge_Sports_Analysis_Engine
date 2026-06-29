@@ -4,6 +4,16 @@ This document describes the complete pose-estimation path: where each operation 
 how latency is measured, which settings control performance, and how the macOS CPU and
 Jetson Orin Nano CUDA configurations differ.
 
+Two model contracts are supported:
+
+- OpenPose COCO Caffe: one 18-joint pose from heatmap maxima.
+- YOLO11n-pose ONNX: multi-person COCO-17 poses with CPU NMS and a synthesized neck
+  joint, selected with `pose_format: yolo11_pose`.
+
+For both contracts, OpenCV image operations and output decoding use the CPU. The
+YOLO Jetson profile uses a native TensorRT FP16 runner; the legacy Caffe Jetson profile
+uses OpenCV's CUDA FP16 DNN target.
+
 ## 1. Current Pose Pipeline
 
 The pose pipeline is assembled in `buildPipeline()`:
@@ -74,11 +84,15 @@ The current preprocessing code runs on the CPU.
 
 ### 2.4 Network inference
 
-The expensive operation is:
+The expensive operation for OpenCV DNN models is:
 
 ```cpp
 cv::Mat output = net_.forward();
 ```
+
+For YOLO TensorRT, the equivalent stage uploads the CPU-created NCHW blob, calls
+`enqueueV3()`, and downloads the fixed `[1,56,8400]` result. CUDA synchronization is
+included in `pose_inference`, so the reported latency is not an asynchronous illusion.
 
 Its execution device depends on the selected backend and target:
 
@@ -250,18 +264,42 @@ pose_target  = cuda_fp16
 Orin Nano uses CUDA compute capability 8.7. OpenCV must be built with CUDA, cuDNN, and
 `OPENCV_DNN_CUDA=ON`.
 
+`configs/yolo11_pose_jetson.yaml` instead uses:
+
+```yaml
+pose_model: models/yolo11n-pose-fp16.engine
+pose_format: yolo11_pose
+pose_input_width: 640
+pose_input_height: 640
+pose_confidence: 0.50
+inference_platform: tensorrt
+```
+
+Build that engine on the target board with `scripts/build_yolo11_tensorrt.sh`.
+
 ## 6. Setting Reference
 
 | Setting | Effect | Performance tradeoff |
 | --- | --- | --- |
 | `width`, `height` | Size of the processed/displayed frame | Affects CPU resize, drawing, display, and output |
+| `resize_mode` | `fit` preserves aspect ratio; `stretch` forces dimensions | Stretching can corrupt pose geometry |
 | `pose_input_width`, `pose_input_height` | DNN input resolution | Usually the strongest configuration-level speed/accuracy tradeoff |
 | `pose_confidence` | Minimum visible-keypoint score | Mostly affects rendering, not network cost |
-| `pose_backend` | OpenCV DNN implementation | Must be supported by the installed OpenCV |
+| `pose_format` | `openpose_coco` or `yolo11_pose` output contract | Selects preprocessing and decoding |
+| `pose_detection_confidence` | YOLO person-box threshold | Lower values retain more candidates |
+| `pose_nms_threshold` | YOLO box overlap threshold | Controls duplicate-person suppression |
+| `pose_max_people` | Maximum YOLO poses after NMS | Bounds downstream CPU work |
+| `pose_backend` | OpenCV DNN implementation or native TensorRT | Must be available in the build |
 | `pose_target` | CPU, CUDA, CUDA FP16, and other targets | Selects execution hardware/precision |
-| `inference_platform` | Convenience hardware profile | Overrides backend and target after config loading |
+| `inference_platform` | `cpu`, `jetson`, or `tensorrt` profile | Overrides backend and target after config loading |
 | `display` | Enable the OpenCV window | Disable for clean benchmarks |
 | `save_output` | Enable video encoding and writing | Disable for clean benchmarks |
+
+The YOLO TensorRT engine in this repository has a fixed 640×640 network input. Reducing
+only `width` and `height` may save a little CPU resize/render work, but it does not reduce
+TensorRT inference latency because the result is scaled back to 640×640. A true inference
+speed change requires exporting and building a separate lower-resolution model engine,
+then measuring its accuracy loss.
 
 ## 7. Input Resolution and Measurement Cadence
 
@@ -302,7 +340,6 @@ Use a fixed video instead of a webcam so every test receives the same frames.
 ```bash
 ./build/video_engine \
   --source video_source/squat.mov \
-  --pipeline pose \
   --config configs/pose.yaml \
   --no-display \
   --no-save
@@ -313,7 +350,6 @@ Use a fixed video instead of a webcam so every test receives the same frames.
 ```bash
 ./build/video_engine \
   --source video_source/squat.mov \
-  --pipeline pose \
   --config configs/pose_jetson.yaml \
   --no-display \
   --no-save

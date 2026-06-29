@@ -10,7 +10,6 @@ From the project root:
 ```bash
 ./build/video_engine \
   --source video_source/IMG_1389.mov \
-  --pipeline pose \
   --config configs/squat.yaml \
   --exercise squat
 ```
@@ -156,6 +155,7 @@ The settings live in `configs/squat.yaml`:
 ```yaml
 exercise: squat
 analysis_output_dir: output
+film_side: right_side_view
 squat:
   squat_standing_angle: 160
   squat_descent_start_angle: 155
@@ -170,6 +170,54 @@ The pose confidence setting is also the minimum confidence used by the analyzer:
 ```yaml
 pose_confidence: 0.12
 ```
+
+The analyzer also supports stability controls:
+
+```yaml
+squat_transition_confirmation_frames: 2
+squat_bottom_confirmation_frames: 1
+squat_descent_commit_angle: 145
+squat_minimum_phase_duration: 0.10
+squat_minimum_rep_duration: 0.50
+squat_maximum_angular_velocity: 720
+squat_maximum_normalized_speed: 4.0
+squat_direction_confirmation_speed: 0.50
+```
+
+Phase changes must persist across multiple frames, satisfy minimum timing, and agree
+with knee direction. The configured film side is locked for a repetition. Impossible
+one-frame angle jumps are rejected and extreme hip-speed samples are ignored, preventing
+small pose jitter from beginning or ending a phase early.
+
+Supported film sides are `front_view`, `front_left_view`, `front_right_view`,
+`left_side_view`, `right_side_view`, `rear_left_view`, `rear_view`, and
+`rear_right_view`. Diagonal and side views select their matching body chain. Straight
+front and rear views choose the valid chain with the higher joint confidence.
+
+Use `resize_mode: fit` for analytics. Non-uniform resizing changes the angles between
+image-space limb vectors even when the source pose did not change.
+
+The ready-to-run Jetson profile combines these settings with YOLO11 TensorRT:
+
+```bash
+./build/video_engine --config configs/yolo11_squat_jetson.yaml
+```
+
+That profile uses a 110° bottom and 115° bottom-exit threshold. On the supplied portrait
+video, two valid repetitions bottom near 105° in YOLO coordinates and would be rejected
+by the legacy Caffe profile's stricter 100°/105° thresholds. Thresholds are deliberately
+model/profile-specific rather than silently changing the Caffe baseline.
+
+Phase changes are logged as compact `[Squat]` lines. For frame-by-frame diagnosis:
+
+```bash
+VIDEO_ENGINE_TRACE_ANALYTICS=1 ./build/video_engine \
+  --config configs/yolo11_squat_jetson.yaml
+```
+
+If a descent begins late because hip/knee/ankle observations are invalid, the analyzer
+pauses rather than fabricating a start time. Improving that case requires better pose
+visibility, camera placement, or temporal keypoint tracking.
 
 Tune thresholds against representative videos. Camera placement, clothing, body
 proportions, and model accuracy can all change the observed 2D angles.

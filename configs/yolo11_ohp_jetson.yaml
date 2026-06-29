@@ -1,0 +1,32 @@
+# Rear-view overhead-press analytics with native TensorRT YOLO11n-pose inference.
+source: video_source/ohp.mov
+width: 640
+height: 640
+resize_mode: fit
+display: true
+save_output: true
+save_path: output/yolo11_ohp
+exercise: ohp
+analysis_output_dir: output
+pose:
+  pose_model: models/yolo11n-pose-fp16.engine
+  pose_format: yolo11_pose
+  pose_input_width: 640
+  pose_input_height: 640
+  pose_confidence: 0.50
+  pose_detection_confidence: 0.25
+  pose_nms_threshold: 0.45
+  pose_max_people: 5
+  inference_platform: tensorrt
+ohp:
+  film_side: rear_view
+  # Rear-view YOLO angles are foreshortened; this clip measures about 45 deg
+  # in the rack and 140 deg at full extension.
+  ohp_rack_elbow_angle: 100
+  ohp_lockout_elbow_angle: 135
+  ohp_lockout_exit_angle: 125
+  ohp_minimum_speed: 0.04
+  ohp_smoothing_alpha: 0.35
+  ohp_minimum_wrist_travel: 0.35
+  ohp_rack_return_tolerance: 0.20
+  ohp_minimum_rep_duration: 0.50

@@ -20,8 +20,20 @@ public:
         ctx.pose_analysis =
             analyzer_->analyze(pose, ctx.frame_id, ctx.source_time_seconds);
         ctx.completed_rep_events.clear();
+        ctx.completed_ohp_rep_events.clear();
         if (ctx.pose_analysis->completed_rep.has_value()) {
-            ctx.completed_rep_events.push_back(*ctx.pose_analysis->completed_rep);
+            const auto& rep = *ctx.pose_analysis->completed_rep;
+            if (rep.rep_index != last_emitted_rep_index_) {
+                ctx.completed_rep_events.push_back(rep);
+                last_emitted_rep_index_ = rep.rep_index;
+            }
+        }
+        if (ctx.pose_analysis->completed_ohp_rep.has_value()) {
+            const auto& rep = *ctx.pose_analysis->completed_ohp_rep;
+            if (rep.rep_index != last_emitted_ohp_rep_index_) {
+                ctx.completed_ohp_rep_events.push_back(rep);
+                last_emitted_ohp_rep_index_ = rep.rep_index;
+            }
         }
     }
 
@@ -31,6 +43,8 @@ public:
 
 private:
     std::shared_ptr<IPoseAnalyzer> analyzer_;
+    int last_emitted_rep_index_ = 0;
+    int last_emitted_ohp_rep_index_ = 0;
 };
 
 }  // namespace video_engine

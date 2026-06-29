@@ -41,7 +41,6 @@ cmake --build build -j4
 
 ```bash
 ./build/video_engine \
-  --pipeline pose \
   --config configs/pose.yaml
 ```
 
@@ -56,7 +55,6 @@ The CPU profile can also be selected explicitly:
 
 ```bash
 ./build/video_engine \
-  --pipeline pose \
   --config configs/pose.yaml \
   --inference-platform cpu
 ```
@@ -66,7 +64,6 @@ The CPU profile can also be selected explicitly:
 ```bash
 ./build/video_engine \
   --source video_source/squat.mov \
-  --pipeline pose \
   --config configs/pose.yaml
 ```
 
@@ -75,7 +72,6 @@ The CPU profile can also be selected explicitly:
 ```bash
 ./build/video_engine \
   --source video_source/squat.mov \
-  --pipeline pose \
   --config configs/pose.yaml \
   --no-display \
   --no-save
@@ -98,9 +94,16 @@ written to `output/squat.json`. See
 
 ## 4. Build and Run on Jetson Orin Nano
 
+For a new board, start with [Jetson First-Time Setup](JETSON_SETUP.md). It provides the
+maintained bootstrap script, verified model download, CUDA capability diagnostic, and
+optional source build. The manual commands below are useful once the base environment
+already exists.
+
 ### 4.1 Software requirements
 
-JetPack 6 is recommended. OpenCV must be built with CUDA DNN support, including:
+JetPack 6.2.x is the project's preferred baseline. CPU mode works with the distribution
+OpenCV. The Jetson GPU profile requires OpenCV itself to be built with CUDA DNN support,
+including:
 
 ```text
 WITH_CUDA=ON
@@ -142,7 +145,6 @@ cmake -S . -B build \
 
 ```bash
 ./build/video_engine \
-  --pipeline pose \
   --config configs/pose_jetson.yaml
 ```
 
@@ -158,7 +160,6 @@ The following command selects the same inference device but retains the input si
 
 ```bash
 ./build/video_engine \
-  --pipeline pose \
   --config configs/pose.yaml \
   --inference-platform jetson-orin-nano
 ```
@@ -166,12 +167,23 @@ The following command selects the same inference device but retains the input si
 Prefer `configs/pose_jetson.yaml` for the existing Caffe model because it also selects a
 smaller 192×192 input. Both configurations run fresh inference on every frame.
 
+For YOLO11n-pose, use native TensorRT; it does not require CUDA support in OpenCV:
+
+```bash
+./scripts/download_pose_model.sh --yolo
+./scripts/build_yolo11_tensorrt.sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j2
+./build/video_engine --config configs/yolo11_pose_jetson.yaml
+```
+
+The engine file is device/runtime-specific and intentionally ignored by Git.
+
 ### 4.4 Video file with CUDA FP16 pose inference
 
 ```bash
 ./build/video_engine \
   --source video_source/squat.mov \
-  --pipeline pose \
   --config configs/pose_jetson.yaml
 ```
 
@@ -180,7 +192,6 @@ smaller 192×192 input. Both configurations run fresh inference on every frame.
 ```bash
 ./build/video_engine \
   --source video_source/squat.mov \
-  --pipeline pose \
   --config configs/pose_jetson.yaml \
   --no-display \
   --no-save
@@ -199,7 +210,6 @@ Check GPU load, CPU load, memory use, temperature, and power.
 ```bash
 ./build/video_engine \
   --source video_source/squat.mov \
-  --pipeline pose \
   --config configs/pose_jetson.yaml \
   --exercise squat
 ```
@@ -214,13 +224,11 @@ inference. Its measured cost is small compared with the current neural network.
 | `--config <path>` | Select a configuration file |
 | `--source webcam` | Use the default camera |
 | `--source <video>` | Use a video file |
-| `--pipeline pose` | Run pose estimation |
-| `--pipeline motion` | Run motion detection |
-| `--pipeline tracking` | Run motion detection and tracking |
 | `--inference-platform cpu` | Force OpenCV CPU inference |
 | `--inference-platform jetson` | Force CUDA FP16 inference |
 | `--inference-platform jetson-orin-nano` | Explicit alias for the Jetson profile |
 | `--exercise squat` | Enable mathematical squat analysis and its live side panel |
+| `--film-side <view>` | Select one of eight camera views around the subject |
 | `--analysis-output <dir>` | Select the JSON summary directory |
 | `--display` | Enable the OpenCV window |
 | `--no-display` | Disable the window, useful over SSH |

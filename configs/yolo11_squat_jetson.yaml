@@ -1,29 +1,30 @@
-# Side-view squat analysis profile for macOS CPU development.
+# Portrait-safe squat analytics with native TensorRT YOLO11n-pose inference.
 source: video_source/squat.mov
 width: 640
 height: 640
 resize_mode: fit
 display: true
-save_output: true
-save_path: output/squat_annotated
+save_output: false
+save_path: output/yolo11_squat
 exercise: squat
 analysis_output_dir: output
 pose:
-  pose_model: models/pose_iter_440000.caffemodel
-  pose_config: models/pose_deploy_linevec.prototxt
-  pose_format: openpose_coco
-  pose_input_width: 256
-  pose_input_height: 256
-  pose_confidence: 0.12
-  pose_backend: opencv
-  pose_target: cpu
+  pose_model: models/yolo11n-pose-fp16.engine
+  pose_format: yolo11_pose
+  pose_input_width: 640
+  pose_input_height: 640
+  pose_confidence: 0.50
+  pose_detection_confidence: 0.25
+  pose_nms_threshold: 0.45
+  pose_max_people: 5
+  inference_platform: tensorrt
 squat:
   film_side: right_side_view
   squat_standing_angle: 160
   squat_descent_start_angle: 155
   squat_descent_commit_angle: 145
-  squat_bottom_angle: 100
-  squat_bottom_exit_angle: 105
+  squat_bottom_angle: 110
+  squat_bottom_exit_angle: 115
   squat_minimum_speed: 0.02
   squat_direction_confirmation_speed: 0.50
   squat_smoothing_alpha: 0.35

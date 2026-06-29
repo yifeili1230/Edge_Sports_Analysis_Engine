@@ -7,38 +7,53 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui videoio dnn)
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-
 add_executable(video_engine src/main.cpp)
+target_include_directories(video_engine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(video_engine PRIVATE ${OpenCV_LIBS})
 
-enable_testing()
-add_executable(motion_detector_test tests/test_motion.cpp)
-target_link_libraries(motion_detector_test PRIVATE ${OpenCV_LIBS})
-target_include_directories(motion_detector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-add_test(NAME motion_detector_test COMMAND motion_detector_test)
+option(VIDEO_ENGINE_ENABLE_TENSORRT "Enable native TensorRT inference when available" ON)
+if(VIDEO_ENGINE_ENABLE_TENSORRT)
+    find_path(TENSORRT_INCLUDE_DIR NvInfer.h
+        PATH_SUFFIXES aarch64-linux-gnu x86_64-linux-gnu)
+    find_path(CUDART_INCLUDE_DIR cuda_runtime_api.h
+        PATHS /usr/local/cuda
+        PATH_SUFFIXES include targets/aarch64-linux/include targets/x86_64-linux/include)
+    find_library(TENSORRT_LIBRARY nvinfer)
+    find_library(CUDART_LIBRARY cudart
+        PATHS /usr/local/cuda/lib64
+        /usr/local/cuda/targets/aarch64-linux/lib
+        /usr/local/cuda/targets/x86_64-linux/lib)
+endif()
 
-add_executable(object_tracker_test tests/test_tracker.cpp)
-target_link_libraries(object_tracker_test PRIVATE ${OpenCV_LIBS})
-target_include_directories(object_tracker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-add_test(NAME object_tracker_test COMMAND object_tracker_test)
+if(TENSORRT_INCLUDE_DIR AND CUDART_INCLUDE_DIR AND TENSORRT_LIBRARY AND CUDART_LIBRARY)
+    target_compile_definitions(video_engine PRIVATE VIDEO_ENGINE_WITH_TENSORRT=1)
+    target_include_directories(video_engine PRIVATE
+        ${TENSORRT_INCLUDE_DIR}
+        ${CUDART_INCLUDE_DIR})
+    target_link_libraries(video_engine PRIVATE ${TENSORRT_LIBRARY} ${CUDART_LIBRARY})
+    message(STATUS "Native TensorRT pose inference: enabled")
+else()
+    target_compile_definitions(video_engine PRIVATE VIDEO_ENGINE_WITH_TENSORRT=0)
+    message(STATUS "Native TensorRT pose inference: disabled")
+endif()
 
-add_executable(skeleton_renderer_test tests/test_skeleton_renderer.cpp)
-target_link_libraries(skeleton_renderer_test PRIVATE ${OpenCV_LIBS})
-target_include_directories(skeleton_renderer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-add_test(NAME skeleton_renderer_test COMMAND skeleton_renderer_test)
+add_executable(video_engine_diagnostics src/diagnostics.cpp)
+target_link_libraries(video_engine_diagnostics PRIVATE ${OpenCV_LIBS})
 
-add_executable(frame_timeline_test tests/test_frame_timeline.cpp)
-target_link_libraries(frame_timeline_test PRIVATE ${OpenCV_LIBS})
-target_include_directories(frame_timeline_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-add_test(NAME frame_timeline_test COMMAND frame_timeline_test)
+include(CTest)
+if(BUILD_TESTING)
+    function(add_video_engine_test test_name source_name)
+        add_executable(${test_name}_test tests/test_${source_name}.cpp)
+        target_link_libraries(${test_name}_test PRIVATE ${OpenCV_LIBS})
+        target_include_directories(${test_name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        add_test(NAME ${test_name}_test COMMAND ${test_name}_test)
+    endfunction()
 
-add_executable(pose_schema_test tests/test_pose_schema.cpp)
-target_link_libraries(pose_schema_test PRIVATE ${OpenCV_LIBS})
-target_include_directories(pose_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-add_test(NAME pose_schema_test COMMAND pose_schema_test)
-
-add_executable(squat_analyzer_test tests/test_squat_analyzer.cpp)
-target_link_libraries(squat_analyzer_test PRIVATE ${OpenCV_LIBS})
-target_include_directories(squat_analyzer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-add_test(NAME squat_analyzer_test COMMAND squat_analyzer_test)
+    add_video_engine_test(skeleton_renderer skeleton_renderer)
+    add_video_engine_test(frame_timeline frame_timeline)
+    add_video_engine_test(pose_schema pose_schema)
+    add_video_engine_test(resize_processor resize_processor)
+    add_video_engine_test(yolo_pose_decoder yolo_pose_decoder)
+    add_video_engine_test(squat_analyzer squat_analyzer)
+    add_video_engine_test(ohp_analyzer ohp_analyzer)
+endif()

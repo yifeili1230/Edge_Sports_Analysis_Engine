@@ -3,6 +3,7 @@ output/
 .vscode/
 models/*.caffemodel
 models/*.onnx
+models/*.engine
 models/*.pb
 models/*.t7
 *.swp
@@ -10,3 +11,7 @@ models/*.t7
 .DS_Store
 docs/agents/
 lessons/
+/y
+/y.pub
+*.pem
+*.key

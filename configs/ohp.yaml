@@ -1,0 +1,29 @@
+# Rear-view overhead-press analysis using the current CPU pose stack.
+source: video_source/ohp.mov
+width: 640
+height: 640
+resize_mode: fit
+display: true
+save_output: true
+save_path: output/ohp_annotated
+exercise: ohp
+analysis_output_dir: output
+pose:
+  pose_model: models/pose_iter_440000.caffemodel
+  pose_config: models/pose_deploy_linevec.prototxt
+  pose_format: openpose_coco
+  pose_input_width: 256
+  pose_input_height: 256
+  pose_confidence: 0.12
+  pose_backend: opencv
+  pose_target: cpu
+ohp:
+  film_side: rear_view
+  ohp_rack_elbow_angle: 120
+  ohp_lockout_elbow_angle: 155
+  ohp_lockout_exit_angle: 145
+  ohp_minimum_speed: 0.04
+  ohp_smoothing_alpha: 0.35
+  ohp_minimum_wrist_travel: 0.35
+  ohp_rack_return_tolerance: 0.20
+  ohp_minimum_rep_duration: 0.50

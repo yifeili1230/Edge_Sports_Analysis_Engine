@@ -1,12 +1,14 @@
 source: webcam
 width: 640
 height: 480
+resize_mode: fit
 display: true
 save_output: true
 save_path: output/output
 pose:
   pose_model: models/pose_iter_440000.caffemodel
   pose_config: models/pose_deploy_linevec.prototxt
+  pose_format: openpose_coco
   pose_input_width: 256
   pose_input_height: 256
   pose_confidence: 0.12
