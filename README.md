@@ -212,14 +212,6 @@ Use YOLO11n-pose without requiring a CUDA-enabled OpenCV build:
 ./build/video_engine --config configs/yolo11_pose_jetson.yaml
 ```
 
-The legacy Caffe model still uses OpenCV DNN. If diagnostics reports CUDA FP16 as
-available, run:
-
-```bash
-./build/video_engine \
-  --config configs/pose_jetson.yaml
-```
-
 Ubuntu's `libopencv-dev` may not include CUDA DNN even when JetPack and CUDA are
 installed. Native TensorRT YOLO inference and the CPU paths still work; the optional
 `scripts/build_opencv_cuda.sh` creates a separate CUDA-enabled OpenCV and `build-cuda/`
@@ -247,8 +239,7 @@ Common overrides:
 
 The current measurements were collected on:
 
-- NVIDIA Jetson Orin Nano Developer Kit “Super,” 8 GB unified memory
-- 6× ARM Cortex-A78AE CPU cores and Ampere GPU, compute capability 8.7
+- NVIDIA Jetson Orin Nano Developer 8 GB unified memory
 - 15 W power mode
 - Jetson Linux R36.4.7, CUDA 12 runtime, TensorRT 10.3, OpenCV 4.8.0
 - Release build with native TensorRT enabled
@@ -256,13 +247,12 @@ The current measurements were collected on:
 - Portrait 1080×1920, 30 FPS MOV input
 
 The installed OpenCV did not include CUDA support. This does not affect the native
-TensorRT YOLO path; it only prevents the legacy Caffe/OpenCV-DNN profiles from using the
-GPU.
+TensorRT YOLO path;
 
 ### Application benchmark
 
 Both measured configurations had live display and MP4 saving enabled. These are complete
-application demonstrations, not isolated headless inference benchmarks.
+application demonstrations.
 
 | Measurement | OHP | Squat |
 | --- | ---: | ---: |
@@ -279,10 +269,6 @@ application demonstrations, not isolated headless inference benchmarks.
 | Complete pose estimator | 35.47 ms | 37.21 ms |
 | Pose-estimator share of pipeline | 88.4% | 87.4% |
 
-The latency target is met: both the 40–43 ms pipeline and the 52–60 ms complete observed
-frame time are below the project limit of **100 ms**. The measured application runs do not
-yet demonstrate the **20 FPS** target—Squat is 4% short and OHP is 16% short—but the
-processor pipeline itself has approximately 23–25 FPS capacity.
 
 TensorRT inference is the dominant cost at roughly 30 ms and 73–75% of pipeline time.
 CPU preprocessing is the next visible cost at approximately 5.4–6.2 ms. Exercise
@@ -300,35 +286,6 @@ and loop overhead. A clean performance-contract run should disable display and s
   --no-save
 ```
 
-The current averages include the cold first frame and do not yet report median, p95, or
-variance. GPU utilization, clocks, temperature, and power were not recorded alongside
-these runs, and clocks were not confirmed locked. Those measurements are required before
-claiming a formal 20 FPS result.
-
-For a reproducible benchmark procedure and an explanation of every timing field, see the
-[Pose Inference Guide](docs/POSE_INFERENCE_GUIDE.md).
-
-## Roadmap
-
-### Next
-
-- Add persistent primary-person tracking
-  - retain the selected athlete when other people enter the frame
-  - use position, bounding-box overlap, keypoint similarity, and reacquisition rules
-
-### After that
-
-- Run a clean headless benchmark with warmup exclusion, median, p95, and variance
-- Record power mode, clocks, GPU utilization, temperature, power, and CPU/GPU transfers
-- Profile TensorRT kernels and the 5–6 ms CPU preprocessing path
-- Evaluate eligible TensorRT INT8 execution after establishing an FP16 accuracy baseline
-- Evaluate hardware decoding, asynchronous stages, and zero-copy only where profiling
-  demonstrates a meaningful gain
-- Connect stereo/depth input through the reserved depth and 3D pose interface
-- Keep the mathematical analytics API open for future learned exercise-analysis models
-
-Detailed decisions, dependencies, and implementation tickets are maintained in the
-[Pose Analytics Decision Map](docs/POSE_ANALYTICS_DECISION_MAP.md).
 
 ## More Documentation
 
