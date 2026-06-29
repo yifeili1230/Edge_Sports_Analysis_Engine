@@ -8,14 +8,18 @@ overhead-press modes derive joint angles, movement speed,
 phases, and repetitions from reliable per-frame timestamps while preserving structured
 results for future subject tracking and learned analytics.
 
-> Current state: the video engine, pose processing flow, canonical pose schema, timing contract,
-> mathematical squat/OHP analytics, platform profiles, and tests are implemented. Persistent
-> primary-person tracking and a faster TensorRT pose model are on the roadmap.
+> Current state: the engine is deployed on a Jetson Orin Nano Developer Kit “Super” with
+> YOLO11n-pose and native TensorRT FP16 inference. Squat and overhead-press analytics,
+> canonical pose conversion, per-stage benchmarking, platform profiles, and eight automated
+> tests are implemented. Persistent primary-person tracking remains on the roadmap.
 
 ## What Has Been Built
 
 - Webcam and recorded-video input
 - OpenPose COCO 18-joint inference through OpenCV DNN
+- Multi-person YOLO11n-pose inference through OpenCV DNN or native TensorRT
+- Native TensorRT FP16 execution on Jetson without requiring CUDA-enabled OpenCV
+- COCO-17 decoding, person-box NMS, letterbox coordinate restoration, and synthesized neck
 - Fresh pose inference for every decoded frame, with no stale-result reuse
 - Canonical named-joint pose data independent of the current model
 - Monotonic frame IDs and source-relative timestamps for motion calculations
@@ -23,31 +27,27 @@ results for future subject tracking and learned analytics.
 - Per-stage latency for preprocessing, inference, postprocessing, rendering, and the
   complete processor pipeline
 - Real-time squat phase, joint-angle, speed, and repetition analysis in a side panel
-- Input-named JSON squat summaries with per-rep metrics
-- Rear-view overhead-press phase, lockout, velocity, rep, and JSON analysis
-- CPU configuration for macOS and CUDA FP16 configuration for Jetson Orin Nano
-- Automated tests for rendering, timeline behavior, pose mapping, and
-  squat state semantics
+- Rear-view overhead-press phase, lockout, velocity, repetition, and JSON analysis
+- Input-named JSON summaries with per-repetition metrics
+- CPU profiles for macOS and native TensorRT FP16 profiles for Jetson Orin Nano
+- Automated tests for rendering, resizing, timing, pose mapping and decoding, profiling,
+  and squat/OHP state semantics
 
-The current Caffe model produces 2D keypoints. Those results are available as structured
-data for the squat analyzer and future learned analytics instead of being limited to the
-skeleton overlay.
+Both inference paths publish the same structured `Pose` objects, so analytics and rendering
+do not depend on whether keypoints came from OpenPose or YOLO. Measurements remain 2D
+image-space estimates rather than anatomical 3D angles or metric velocities.
 
 ## Demo
 
-The executable always performs pose estimation and draws joints connected by skeleton
-lines. It can display a live OpenCV window or save an annotated video. A typical
-runtime report looks like:
+The executable performs pose estimation, draws connected joints, and optionally runs an
+exercise analyzer. It can display a live OpenCV window or save an annotated video. At the
+end of a run it reports average throughput and stage latency:
 
 ```text
-[Frame 3] FPS: 3.4
-| resize: 0.40 ms
-| pose_preprocess: 0.41 ms
-| pose_inference: 261.56 ms
-| pose_postprocess: 0.01 ms
-| pose_estimator: 261.98 ms
-| skeleton_renderer: 0.10 ms
-| pipeline: 262.47 ms
+[Average Benchmarks] result="output/squat.json" frames=875 FPS: 19.2
+| pose_inference: 30.95 ms
+| pose_estimator: 37.21 ms
+| pipeline: 42.59 ms
 ```
 
 Run the included squat video:
@@ -92,7 +92,9 @@ Webcam / Video File
         |
         v
  PoseEstimator
- preprocess -> DNN -> decode
+ OpenPose / YOLO preprocess
+ OpenCV DNN / native TensorRT
+ model-specific decode + NMS
         |
         v
  Canonical Pose Schema
@@ -111,18 +113,18 @@ Webcam / Video File
 ```
 
 All frame processors implement a shared `IFrameProcessor` interface and exchange data
-through `FrameContext`. Pose-model channel indices are translated by
-`OpenPoseCocoAdapter` into named joints before rendering or analytics. This keeps future
-ONNX/TensorRT models and exercise-analysis modules separate from the current Caffe
-implementation.
+through `FrameContext`. `OpenPoseCocoAdapter` maps OpenPose channels, while
+`YoloPoseDecoder` maps multi-person COCO-17 output and synthesizes the missing neck joint.
+Both produce the same named canonical joints before rendering or analytics.
 
-The CPU currently handles capture, resize, orchestration, pose decoding, analytics-ready
-data, rendering, and output. Neural-network inference runs on the configured OpenCV DNN
-target:
+On the measured Jetson path, the ARM CPU handles capture/decode, resize, YOLO letterbox
+preprocessing, pose/NMS decoding, analytics, rendering, display, and video encoding.
+`TensorRtRunner` uploads the FP32 input tensor, executes the internally FP16 engine on the
+Ampere GPU/Tensor Cores, downloads the FP32 output, and synchronizes before CPU decoding.
 
-- macOS profile: CPU
-- Jetson Orin Nano profile: CUDA FP16
-- Planned Orin production path: lightweight ONNX model with TensorRT FP16
+- macOS: OpenCV DNN CPU with Caffe or YOLO11n-pose ONNX
+- Jetson production path: native TensorRT with a fixed 640×640 YOLO11n-pose FP16 engine
+- Legacy Jetson Caffe path: OpenCV DNN CUDA FP16, only when OpenCV was built with CUDA
 
 For the complete frame lifecycle and CPU/GPU boundary, see the
 [Video Engine Guide](docs/VIDEO_ENGINE_GUIDE.md) and
@@ -241,29 +243,67 @@ Common overrides:
 
 ## Current Benchmark
 
-Representative frame from the completed 117-frame macOS CPU squat validation:
+### Jetson platform
 
-| Stage | Example latency |
-| --- | ---: |
-| Resize | 0.28 ms |
-| Pose preprocessing | 0.26 ms |
-| Neural-network inference | 262.30 ms |
-| Pose postprocessing | 0.01 ms |
-| Complete pose estimator | 262.57 ms |
-| Squat analytics | <0.01 ms |
-| Skeleton rendering | 0.09 ms |
-| Analytics side panel | 0.60 ms |
-| Processor pipeline | 263.55 ms |
-| Observed throughput | 3.8 FPS |
+The current measurements were collected on:
 
-Inference is the dominant cost; resizing and drawing are currently negligible by
-comparison. This points the next optimization effort toward a smaller model and an
-accelerated inference backend.
+- NVIDIA Jetson Orin Nano Developer Kit “Super,” 8 GB unified memory
+- 6× ARM Cortex-A78AE CPU cores and Ampere GPU, compute capability 8.7
+- 15 W power mode
+- Jetson Linux R36.4.7, CUDA 12 runtime, TensorRT 10.3, OpenCV 4.8.0
+- Release build with native TensorRT enabled
+- YOLO11n-pose, fixed 640×640 TensorRT engine with internal FP16 execution
+- Portrait 1080×1920, 30 FPS MOV input
 
-These numbers are a development baseline, not a formal cross-platform benchmark. The
-Jetson Orin Nano profile is prepared but has not yet been measured on the physical
-device. Its project target is at least **20 FPS** and less than **100 ms** end-to-end
-latency.
+The installed OpenCV did not include CUDA support. This does not affect the native
+TensorRT YOLO path; it only prevents the legacy Caffe/OpenCV-DNN profiles from using the
+GPU.
+
+### Application benchmark
+
+Both measured configurations had live display and MP4 saving enabled. These are complete
+application demonstrations, not isolated headless inference benchmarks.
+
+| Measurement | OHP | Squat |
+| --- | ---: | ---: |
+| Processed frames | 589 | 875 |
+| Detected repetitions | 6 | 5 |
+| Valid analysis frames | 589 | 875 |
+| Observed throughput | 16.8 FPS | 19.2 FPS |
+| Wall time per frame from FPS | 59.5 ms | 52.1 ms |
+| Complete processor pipeline | 40.12 ms | 42.59 ms |
+| Pipeline-only capacity | 24.9 FPS | 23.5 FPS |
+| Work outside pipeline | 19.4 ms | 9.5 ms |
+| TensorRT inference | 29.97 ms | 30.95 ms |
+| Inference share of pipeline | 74.7% | 72.7% |
+| Complete pose estimator | 35.47 ms | 37.21 ms |
+| Pose-estimator share of pipeline | 88.4% | 87.4% |
+
+The latency target is met: both the 40–43 ms pipeline and the 52–60 ms complete observed
+frame time are below the project limit of **100 ms**. The measured application runs do not
+yet demonstrate the **20 FPS** target—Squat is 4% short and OHP is 16% short—but the
+processor pipeline itself has approximately 23–25 FPS capacity.
+
+TensorRT inference is the dominant cost at roughly 30 ms and 73–75% of pipeline time.
+CPU preprocessing is the next visible cost at approximately 5.4–6.2 ms. Exercise
+analytics costs about 0.01 ms, while skeleton and side-panel rendering remain below
+2.7 ms combined.
+
+The gap between pipeline latency and observed FPS comes from work outside the pipeline
+timer: video decode, display/event processing, MP4 encoding and writing, per-frame logging,
+and loop overhead. A clean performance-contract run should disable display and saving:
+
+```bash
+./build/video_engine \
+  --config configs/yolo11_squat_jetson.yaml \
+  --no-display \
+  --no-save
+```
+
+The current averages include the cold first frame and do not yet report median, p95, or
+variance. GPU utilization, clocks, temperature, and power were not recorded alongside
+these runs, and clocks were not confirmed locked. Those measurements are required before
+claiming a formal 20 FPS result.
 
 For a reproducible benchmark procedure and an explanation of every timing field, see the
 [Pose Inference Guide](docs/POSE_INFERENCE_GUIDE.md).
@@ -278,10 +318,10 @@ For a reproducible benchmark procedure and an explanation of every timing field,
 
 ### After that
 
-- Replace the heavy Caffe network with a faster, accurate multi-person ONNX pose model
-- Use one canonical keypoint contract across macOS and Jetson
-- Integrate TensorRT FP16, then evaluate eligible INT8 execution on Orin Nano
-- Benchmark power mode, temperature, Tensor Core use, and CPU/GPU transfers
+- Run a clean headless benchmark with warmup exclusion, median, p95, and variance
+- Record power mode, clocks, GPU utilization, temperature, power, and CPU/GPU transfers
+- Profile TensorRT kernels and the 5–6 ms CPU preprocessing path
+- Evaluate eligible TensorRT INT8 execution after establishing an FP16 accuracy baseline
 - Evaluate hardware decoding, asynchronous stages, and zero-copy only where profiling
   demonstrates a meaningful gain
 - Connect stereo/depth input through the reserved depth and 3D pose interface
