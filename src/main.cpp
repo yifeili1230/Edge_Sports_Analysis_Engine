@@ -468,7 +468,9 @@ int main(int argc, char** argv) {  // Program entry point.
     std::optional<video_engine::OhpPhase> reported_ohp_phase;
     const bool trace_analytics_frames =
         std::getenv("VIDEO_ENGINE_TRACE_ANALYTICS") != nullptr;
+    video_engine::BenchmarkAccumulator benchmark_accumulator;
     auto start_time = video_engine::Profiler::now();  // Captures the start time for average FPS.
+    double elapsed_seconds = 0.0;
     while (!stop_requested) {  // Main frame loop; Ctrl+C requests a graceful stop.
         cv::Mat frame;  // Holds the raw frame read from the input source.
         if (!source->read(frame)) {  // Reads the next frame from the selected source.
@@ -574,9 +576,11 @@ int main(int argc, char** argv) {  // Program entry point.
         }  // End of output writing branch.
 
         ++frame_index;  // Advances the processed frame count.
+        benchmark_accumulator.addFrame(ctx.stage_names,
+                                       ctx.stage_latencies_ms);
         auto now = video_engine::Profiler::now();  // Gets the current timestamp.
-        double elapsed = std::chrono::duration<double>(now - start_time).count();  // Computes elapsed seconds.
-        double fps = elapsed > 0 ? frame_index / elapsed : 0.0;  // Computes average FPS since startup.
+        elapsed_seconds = std::chrono::duration<double>(now - start_time).count();  // Computes elapsed seconds.
+        double fps = elapsed_seconds > 0 ? frame_index / elapsed_seconds : 0.0;  // Computes average FPS since startup.
         video_engine::Profiler::logFrameStats(frame_index, fps, ctx.stage_names, ctx.stage_latencies_ms);  // Logs frame stats and latency.
         if (escape_pressed) {
             break;
@@ -604,6 +608,10 @@ int main(int argc, char** argv) {  // Program entry point.
                 return 1;
             }
             std::cout << "OHP summary saved to: " << summary_path << std::endl;
+            std::cout << benchmark_accumulator.formatSummary(
+                             summary_path.string(), frame_index,
+                             elapsed_seconds)
+                      << std::endl;
             return 0;
         }
         video_engine::SquatSessionSummary summary;
@@ -621,6 +629,9 @@ int main(int argc, char** argv) {  // Program entry point.
             return 1;
         }
         std::cout << "Squat summary saved to: " << summary_path << std::endl;
+        std::cout << benchmark_accumulator.formatSummary(
+                         summary_path.string(), frame_index, elapsed_seconds)
+                  << std::endl;
     }
     return 0;  // Returns success.
 }  // End of main.

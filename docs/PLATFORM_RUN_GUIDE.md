@@ -261,6 +261,12 @@ performance claim.
   for comparing CPU and CUDA execution.
 - `pose_estimator` includes preprocessing, inference, and postprocessing.
 - `pipeline` includes all processors but excludes capture, display, and video writing.
+
+After an analytics result is successfully written, the terminal prints one
+`[Average Benchmarks]` line associated with its JSON path. Its FPS is end-to-end
+throughput across the completed run, and each stage latency is the arithmetic mean
+of that stage's samples across all processed frames.
+
 For a fair platform comparison, use the same video and model input size, with display and
 saving disabled.
 
